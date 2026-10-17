@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const WORKBOOK_PATH = "/ACT_DA_Opportunity_Tracker_Interactive.xlsx";
@@ -40,7 +41,8 @@ try {
   }
 
   const payload = JSON.stringify({ sheetNames, ranges, charts });
-  console.log(`WORKBOOK_INSPECTION=${encrypt(payload, process.env.WORKBOOK_INSPECT_KEY)}`);
+  await fs.promises.writeFile("/tmp/workbook-inspection.enc", encrypt(payload, process.env.WORKBOOK_INSPECT_KEY));
+  console.log("Encrypted workbook inspection created.");
 } finally {
   await graph(`${root}/closeSession`, { method: "POST", body: {}, tolerate404: true });
 }

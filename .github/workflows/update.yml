@@ -45,6 +45,12 @@ jobs:
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
           WORKBOOK_INSPECT_KEY: ${{ secrets.WORKBOOK_INSPECT_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && inputs.operation == 'inspect'
+        with:
+          name: encrypted-workbook-inspection
+          path: /tmp/workbook-inspection.enc
+          retention-days: 1
       - name: Keep the public scheduled workflow active
         if: github.event.schedule == '17 2 1 * *'
         run: |
