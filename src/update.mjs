@@ -91,14 +91,14 @@ try {
     body: { values: rows }
   });
 
-  await synchroniseRegister(root, arcResponse.features, documentsByDa);
+  const registerStats = await synchroniseRegister(root, arcResponse.features, documentsByDa);
   await repairReports(root, rows.length);
   await graph(`${root}/application/calculate`, {
     method: "POST",
     body: { calculationType: "Full" }
   });
 
-  console.log(JSON.stringify({ updatedRows: rows.length, registerRows: rows.length, updatedAtUtc: new Date().toISOString() }));
+  console.log(JSON.stringify({ updatedRows: rows.length, registerRows: rows.length, ...registerStats, updatedAtUtc: new Date().toISOString() }));
 } finally {
   await graph(`${root}/closeSession`, { method: "POST", body: {}, tolerate404: true });
 }
@@ -275,6 +275,16 @@ async function synchroniseRegister(root, features, documentsByDa) {
       });
     }
   }
+  const legacyCell = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A1:A1')`);
+  const budgetIndex = headers.indexOf("Project Budget");
+  const documentPackIndex = headers.indexOf("Document pack");
+  const costPlanIndex = headers.indexOf("Cost plan document");
+  return {
+    legacyRecordKeyCleared: String(legacyCell.values?.[0]?.[0] ?? "").trim() === "",
+    budgetsRecorded: dataRows.filter((row) => budgetIndex >= 0 && row[budgetIndex] !== "").length,
+    documentPacksLinked: dataRows.filter((row) => documentPackIndex >= 0 && row[documentPackIndex] !== "").length,
+    costPlansLinked: dataRows.filter((row) => costPlanIndex >= 0 && row[costPlanIndex] !== "").length
+  };
 }
 
 async function fetchRelevantDocuments(features) {
