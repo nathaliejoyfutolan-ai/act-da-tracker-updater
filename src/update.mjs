@@ -36,6 +36,26 @@ const WORKBOOK_PATH = "/ACT_DA_Opportunity_Tracker_Interactive.xlsx";
 const SHEET_NAME = "ACT Live Feed";
 const COLUMN_COUNT = 28;
 
+// System-populated fields stay on the left; user-maintained workflow fields
+// stay on the right. Lower-value technical fields remain available but hidden.
+const REGISTER_AUTO_VISIBLE_HEADERS = [
+  "DA number", "Amendment", "All documents", "Stage", "Priority", "Address", "Suburb", "District",
+  "Building type", "Proposal", "Lodged", "Notification closes", "Days to notification close",
+  "Organisation / developer lead", "Applicant", "Builder", "Project budget (AUD)", "Solar allowance",
+  "Battery allowance", "Cost plan document", "Document review", "Decision", "Decision date"
+];
+const REGISTER_AUTO_HIDDEN_HEADERS = [
+  "Record Key", "Application type", "Application subtype", "Block", "Section", "Block key",
+  "Representation starts", "Application amended", "Publicly notified", "Document count", "Document pack",
+  "Document intelligence checked", "Builder source", "Budget source", "Solar / battery evidence",
+  "Source last updated", "Last checked", "Latitude", "Longitude"
+];
+const REGISTER_MANUAL_HEADERS = [
+  "Next action", "Action owner", "Follow-up due", "Follow-up status", "Tender status", "Proposal status",
+  "Estimated fee (AUD)", "Relationship / contact", "Last contact", "Notes"
+];
+const REGISTER_HEADERS = [...REGISTER_AUTO_VISIBLE_HEADERS, ...REGISTER_AUTO_HIDDEN_HEADERS, ...REGISTER_MANUAL_HEADERS];
+
 const required = ["MS_TENANT_ID", "MS_CLIENT_ID", "MS_REFRESH_TOKEN"];
 for (const key of required) {
   if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
@@ -110,41 +130,14 @@ async function synchroniseRegister(root, features, documentsByDa, documentIndex)
   const table = tables.value?.find((item) => item.name === "DARegisterTable");
   if (!table) throw new Error("DARegisterTable was not found.");
   const tableBase = `${root}/tables/${encodeURIComponent(table.id)}`;
-  const addedHeaders = [
-    "Application type",
-    "Application subtype",
-    "Block key",
-    "Representation starts",
-    "Decision",
-    "Decision date",
-    "Application amended",
-    "Publicly notified",
-    "Relevant document count",
-    "Document pack",
-    "Cost plan document",
-    "Document intelligence checked",
-    "Builder source",
-    "Document count",
-    "All documents"
-  ];
-
   let tableRange = await graph(`${tableBase}/range`);
-  let headers = tableRange.values?.[0] ?? [];
-  for (const header of addedHeaders) {
-    if (headers.includes(header)) continue;
-    await graph(`${tableBase}/columns/add`, {
-      method: "POST",
-      body: { name: header }
-    });
-    tableRange = await graph(`${tableBase}/range`);
-    headers = tableRange.values?.[0] ?? [];
-  }
+  const originalHeaders = tableRange.values?.[0] ?? [];
 
   const existingRows = (tableRange.values ?? []).slice(1);
   const existingByKey = new Map();
-  const keyIndex = headers.indexOf("Record Key");
-  const daIndex = headers.indexOf("DA number");
-  const amendmentIndex = headers.indexOf("Amendment");
+  const keyIndex = originalHeaders.indexOf("Record Key");
+  const daIndex = originalHeaders.indexOf("DA number");
+  const amendmentIndex = originalHeaders.indexOf("Amendment");
   for (const row of existingRows) {
     const daNumber = textValue(row[daIndex]);
     const amendment = textValue(row[amendmentIndex]);
@@ -152,27 +145,25 @@ async function synchroniseRegister(root, features, documentsByDa, documentIndex)
     if (key) existingByKey.set(key, row);
   }
 
-  const intelligenceByKey = await extractMissingDocumentIntelligence(features, headers, existingByKey, documentsByDa);
+  const intelligenceByKey = await extractMissingDocumentIntelligence(features, originalHeaders, existingByKey, documentsByDa);
 
   const dataRows = features.map(({ attributes: a = {} }) => {
     const daNumber = textValue(a.DA_NUMBER);
     const amendment = textValue(a.AMENDMENT_VERSION);
     const key = recordKey(daNumber, amendment);
     const existing = existingByKey.get(key) ?? [];
-    const old = (header) => existing[headers.indexOf(header)] ?? "";
+    const old = (header) => existing[originalHeaders.indexOf(header)] ?? "";
     const proposal = textValue(a.PROPOSAL_TEXT);
     const classifiedBuilding = classifyBuilding(`${textValue(a.APPLICATION_TYPE)} ${textValue(a.APPLICATION_SUB_TYPE)} ${proposal}`);
     const buildingType = old("Building type") || registerBuildingType(classifiedBuilding);
     const priority = old("Priority") || classifyPriority(classifiedBuilding, proposal);
-    const url = directApplicationUrl(daNumber, amendment);
     const organisation = textValue(a.COMPANYORG_NAME);
     const documents = documentsByDa.get(daNumber) ?? [];
-    const exactDocuments = documentsForVersion(documents, amendment);
     const costDocument = preferredDocument(documents, amendment, isCostDocument);
     const applicationDocument = preferredDocument(documents, amendment, isApplicationDocument);
     const zipDocument = preferredDocument(documents, amendment, isZipDocument);
     const intelligence = intelligenceByKey.get(key) ?? {};
-    const projectBudget = firstNonBlank(old("Project Budget"), old("Project budget (AUD)"));
+    const projectBudget = firstNonBlank(old("Project budget (AUD)"), old("Project Budget"));
     const previousBuilder = /^Not publicly identified/i.test(textValue(old("Builder"))) ? "" : old("Builder");
     const builder = firstNonBlank(previousBuilder, intelligence.builder, "Not publicly identified (DA stage)");
     const builderSource = firstNonBlank(
@@ -183,7 +174,6 @@ async function synchroniseRegister(root, features, documentsByDa, documentIndex)
     const sourceValues = {
       "DA number": daNumber,
       Amendment: amendment,
-      "DA detail URL": url,
       Lodged: excelDate(a.LODGEMENT_DATE),
       "Notification closes": excelDate(a.DATE_END),
       Stage: normalizeStage(a.DA_STAGE),
@@ -202,32 +192,24 @@ async function synchroniseRegister(root, features, documentsByDa, documentIndex)
       "Budget source": firstNonBlank(old("Budget source") === "Not found in source feed" ? "" : old("Budget source"), intelligence.budget ? `DA document: ${costDocument?.name ?? "cost plan"}` : "Not found in source feed"),
       "Solar allowance": firstNonBlank(old("Solar allowance") === "Not stated - review documents" ? "" : old("Solar allowance"), intelligence.solar ? "Mentioned in DA documents" : "", proposal.toUpperCase().includes("SOLAR") ? "Mentioned in proposal" : "Not stated - review documents"),
       "Battery allowance": firstNonBlank(old("Battery allowance") === "Not stated - review documents" ? "" : old("Battery allowance"), intelligence.battery ? "Mentioned in DA documents" : "", proposal.toUpperCase().includes("BATTERY") ? "Mentioned in proposal" : "Not stated - review documents"),
-      "Solar / battery evidence": firstNonBlank(old("Solar / battery evidence"), intelligence.energyEvidence, /(SOLAR|BATTERY)/i.test(proposal) ? "Proposal text" : ""),
+      "Solar / battery evidence": firstNonBlank(old("Solar / battery evidence"), old("Evidence"), intelligence.energyEvidence, /(SOLAR|BATTERY)/i.test(proposal) ? "Proposal text" : ""),
       "Document review": firstNonBlank(intelligence.reviewStatus, old("Document review"), priority === "High" ? "Queued" : "Not started"),
-      "Next action": priority === "High" && !previousBuilder && !intelligence.builder && ["", "Review plans, cost plan and electrical scope"].includes(textValue(old("Next action")))
-        ? defaultNextAction(priority, normalizeStage(a.DA_STAGE), false)
-        : old("Next action") || defaultNextAction(priority, normalizeStage(a.DA_STAGE), Boolean(previousBuilder || intelligence.builder)),
+      "Next action": old("Next action"),
       "Action owner": old("Action owner"),
-      "Follow-up status": old("Follow-up status") || "Not contacted",
+      "Follow-up status": old("Follow-up status"),
       "Source last updated": excelDate(a.DATECREATED, true),
       "Last checked": excelDate(Date.now()),
       Latitude: numberOrBlank(a.CENTROID_LAT),
       Longitude: numberOrBlank(a.CENTROID_LONG),
       "Days to notification close": "",
       "Review due": old("Review due"),
-      "Follow-up due": old("Follow-up due"),
-      "Tender status": old("Tender status") || "Unknown",
-      "Proposal status": old("Proposal status") || "Not started",
-      "Estimated fee (AUD)": old("Estimated fee (AUD)"),
+      "Follow-up due": firstNonBlank(old("Follow-up due"), old("Follow-up Date")),
+      "Tender status": old("Tender status"),
+      "Proposal status": old("Proposal status"),
+      "Estimated fee (AUD)": firstNonBlank(old("Estimated fee (AUD)"), old("Estimated Fee")),
       "Relationship / contact": old("Relationship / contact"),
       "Last contact": old("Last contact"),
       Notes: old("Notes"),
-      "Developer / Owner": old("Developer / Owner") || organisation,
-      "Project Budget": firstNonBlank(projectBudget, intelligence.budget),
-      Evidence: firstNonBlank(old("Evidence"), intelligence.evidence),
-      "Follow-up Date": old("Follow-up Date"),
-      "Estimated Fee": old("Estimated Fee"),
-      "ACT Application URL": url,
       "Record Key": key,
       "Application type": textValue(a.APPLICATION_TYPE),
       "Application subtype": textValue(a.APPLICATION_SUB_TYPE),
@@ -237,7 +219,6 @@ async function synchroniseRegister(root, features, documentsByDa, documentIndex)
       "Decision date": excelDate(a.DECISION_DATE),
       "Application amended": textValue(a.APPLICATION_AMENDED),
       "Publicly notified": textValue(a.PUBLICLY_NOTIFIED),
-      "Relevant document count": exactDocuments.length,
       "Document pack": zipDocument ? documentUrl(zipDocument.name) : "",
       "Cost plan document": costDocument ? documentUrl(costDocument.name) : "",
       "Document intelligence checked": firstNonBlank(intelligence.checked, old("Document intelligence checked")),
@@ -245,14 +226,18 @@ async function synchroniseRegister(root, features, documentsByDa, documentIndex)
       "Document count": documents.length,
       "All documents": documentIndex.firstRowByDa.get(daNumber) ? `#'DA Documents'!A${documentIndex.firstRowByDa.get(daNumber)}` : ""
     };
-    return headers.map((header) => safeCellValue(sourceValues[header] ?? old(header)));
+    return REGISTER_HEADERS.map((header) => safeCellValue(sourceValues[header] ?? old(header)));
   });
 
-  const writableRowCount = await resizeTableRows(tableBase, tableRange, dataRows.length, headers.length);
+  const writableRowCount = await resizeTableRows(tableBase, tableRange, dataRows.length, originalHeaders.length);
   const rowsToWrite = dataRows.concat(
-    Array.from({ length: writableRowCount - dataRows.length }, () => Array(headers.length).fill(""))
+    Array.from({ length: writableRowCount - dataRows.length }, () => Array(REGISTER_HEADERS.length).fill(""))
   );
+  if (!sameHeaders(originalHeaders, REGISTER_HEADERS)) {
+    await rebuildTableColumns(tableBase, rowsToWrite, REGISTER_HEADERS);
+  }
   tableRange = await graph(`${tableBase}/range`);
+  const headers = tableRange.values?.[0] ?? [];
   const { firstColumn, headerRow } = parseRangeAddress(tableRange.address);
   const firstDataRow = headerRow + 1;
   const lastDataRow = firstDataRow + rowsToWrite.length - 1;
@@ -266,10 +251,6 @@ async function synchroniseRegister(root, features, documentsByDa, documentIndex)
     const a = feature.attributes ?? {};
     return `=HYPERLINK("${formulaText(directApplicationUrl(a.DA_NUMBER, a.AMENDMENT_VERSION))}","${formulaText(a.DA_NUMBER)}")`;
   }, features);
-  await writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "DA detail URL", ({ feature }) => {
-    const a = feature.attributes ?? {};
-    return `=HYPERLINK("${formulaText(directApplicationUrl(a.DA_NUMBER, a.AMENDMENT_VERSION))}","Open DA")`;
-  }, features);
   await writeOptionalLinkColumn(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "Document pack", "Open documents");
   await writeOptionalLinkColumn(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "Cost plan document", "Open cost plan");
   await writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "All documents", ({ feature }) => {
@@ -278,13 +259,14 @@ async function synchroniseRegister(root, features, documentsByDa, documentIndex)
     const count = documentIndex.countByDa.get(daNumber) ?? 0;
     return row ? `=HYPERLINK("#'DA Documents'!A${row}","View ${count} documents")` : "";
   }, features);
+  const notificationColumn = columnName(columnNumber(firstColumn) + headers.indexOf("Notification closes"));
   await writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "Days to notification close", ({ row }) =>
-    `=IF(E${row}="","",E${row}-TODAY())`, features);
+    `=IF(${notificationColumn}${row}="","",${notificationColumn}${row}-TODAY())`, features);
 
-  for (const header of ["Lodged", "Notification closes", "Last checked", "Last contact", "Follow-up Date", "Representation starts", "Decision date"]) {
+  for (const header of ["Lodged", "Notification closes", "Last checked", "Last contact", "Follow-up due", "Representation starts", "Decision date"]) {
     await setColumnNumberFormat(root, sheetName, headers, firstColumn, firstDataRow, lastDataRow, header, "dd-mmm-yyyy");
   }
-  for (const header of ["Project budget (AUD)", "Project Budget", "Estimated fee (AUD)", "Estimated Fee"]) {
+  for (const header of ["Project budget (AUD)", "Estimated fee (AUD)"]) {
     await setColumnNumberFormat(root, sheetName, headers, firstColumn, firstDataRow, lastDataRow, header, '"$"#,##0');
   }
 
@@ -299,11 +281,17 @@ async function synchroniseRegister(root, features, documentsByDa, documentIndex)
     }
   }
   const legacyCell = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A1:A1')`);
-  const budgetIndex = headers.indexOf("Project Budget");
+  await formatRegisterZones(root, sheetName, headers, firstColumn, headerRow, lastDataRow);
+
+  const budgetIndex = headers.indexOf("Project budget (AUD)");
   const documentPackIndex = headers.indexOf("Document pack");
   const costPlanIndex = headers.indexOf("Cost plan document");
   return {
     legacyRecordKeyCleared: String(legacyCell.values?.[0]?.[0] ?? "").trim() === "",
+    registerColumns: headers.length,
+    visibleAutofillColumns: REGISTER_AUTO_VISIBLE_HEADERS.length,
+    hiddenTechnicalColumns: REGISTER_AUTO_HIDDEN_HEADERS.length,
+    manualInputColumns: REGISTER_MANUAL_HEADERS.length,
     budgetsRecorded: dataRows.filter((row) => budgetIndex >= 0 && row[budgetIndex] !== "").length,
     documentPacksLinked: dataRows.filter((row) => documentPackIndex >= 0 && row[documentPackIndex] !== "").length,
     costPlansLinked: dataRows.filter((row) => costPlanIndex >= 0 && row[costPlanIndex] !== "").length
@@ -452,8 +440,7 @@ async function extractMissingDocumentIntelligence(features, headers, existingByK
     const cost = preferredDocument(documents, amendment, isCostDocument);
     const application = preferredDocument(documents, amendment, isApplicationDocument);
     const developmentReport = preferredDocument(documents, amendment, isDevelopmentReport);
-    const relevantCount = documentsForVersion(documents, amendment).length;
-    const unchanged = Number(old("Relevant document count")) === relevantCount && /^Auto-reviewed v2/.test(textValue(old("Document review")));
+    const unchanged = Number(old("Document count")) === documents.length && /^Auto-reviewed v2/.test(textValue(old("Document review")));
     if (unchanged || (!cost && !application && !developmentReport)) continue;
     candidates.push({
       key,
@@ -528,15 +515,15 @@ async function repairReports(root, registerRowCount) {
   const dailyRows = Array.from({ length: 5 }, (_, offset) => {
     const row = 12 + offset;
     return [
-      `=IFERROR(HYPERLINK(${indexed("ACT Application URL", row)},${indexed("DA number", row)}),"")`,
+      `=IFERROR(${indexed("DA number", row)},"")`,
       `=IFERROR(${indexed("Stage", row)},"")`,
       `=IFERROR(${indexed("Address", row)},"")`,
       `=IFERROR(${guarded("Proposal", row)},"")`,
       `=IFERROR(${guarded("Building type", row)},"")`,
-      `=IFERROR(${guarded("Developer / Owner", row)},"")`,
+      `=IFERROR(${guarded("Organisation / developer lead", row)},"")`,
       `=IFERROR(${guarded("Builder", row)},"")`,
-      `=IFERROR(${guarded("Project Budget", row)},"")`,
-      `=IFERROR(${guarded("Follow-up Date", row)},"")`
+      `=IFERROR(${guarded("Project budget (AUD)", row)},"")`,
+      `=IFERROR(${guarded("Follow-up due", row)},"")`
     ];
   });
   await patchRange(root, "Daily Report", "A11:I11", {
@@ -565,9 +552,9 @@ async function repairReports(root, registerRowCount) {
   await patchRange(root, "Daily Report", "D20:D27", { formulas: [
     ['="Tracking "&A5&" current applications across "&COUNTIFS(DARegisterTable[District],"<>")&" populated district records."'],
     ['="See the building-type chart; "&COUNTIFS(DARegisterTable[Building type],"<>")&" applications have a classified building type."'],
-    ['=COUNTIFS(DARegisterTable[Developer / Owner],"<>")&" applications have an owner or developer identified."'],
+    ['=COUNTIFS(DARegisterTable[Organisation / developer lead],"<>")&" applications have an owner or developer identified."'],
     ['=COUNTIFS(DARegisterTable[Builder],"<>",DARegisterTable[Builder],"<>Not publicly identified*")&" applications have a builder publicly identified; the others require tender/network follow-up."'],
-    ['=COUNTIFS(DARegisterTable[Project Budget],"<>")&" budgets are recorded, totalling "&TEXT(SUM(DARegisterTable[Project Budget]),"$#,##0")&"."'],
+    ['=COUNTIFS(DARegisterTable[Project budget (AUD)],"<>")&" budgets are recorded, totalling "&TEXT(SUM(DARegisterTable[Project budget (AUD)]),"$#,##0")&"."'],
     ['=COUNTIFS(DARegisterTable[Solar allowance],"Mentioned*")&" applications mention solar; the remaining documents require review."'],
     ['=COUNTIFS(DARegisterTable[Battery allowance],"Mentioned*")&" applications mention battery storage; the remaining documents require review."'],
     ['=COUNTIFS(DARegisterTable[Tender status],"<>Unknown")&" tender statuses and "&COUNTIFS(DARegisterTable[Proposal status],"<>Not started")&" active proposal statuses are recorded."']
@@ -581,9 +568,9 @@ async function repairReports(root, registerRowCount) {
   const followUpFormulas = [];
   for (let offset = 0; offset < count; offset += 1) {
     const row = 20 + offset;
-    ownerFormulas.push([`=IFERROR(IF(${summaryIndexed("Developer / Owner", row)}="","",${summaryIndexed("Developer / Owner", row)}),"")`]);
+    ownerFormulas.push([`=IFERROR(IF(${summaryIndexed("Organisation / developer lead", row)}="","",${summaryIndexed("Organisation / developer lead", row)}),"")`]);
     actionOwnerFormulas.push([`=IFERROR(IF(${summaryIndexed("Action owner", row)}="","",${summaryIndexed("Action owner", row)}),"")`]);
-    followUpFormulas.push([`=IFERROR(IF(${summaryIndexed("Follow-up Date", row)}="","",${summaryIndexed("Follow-up Date", row)}),"")`]);
+    followUpFormulas.push([`=IFERROR(IF(${summaryIndexed("Follow-up due", row)}="","",${summaryIndexed("Follow-up due", row)}),"")`]);
   }
   const lastSummaryRow = 19 + count;
   await patchRange(root, "Summary", `F20:F${lastSummaryRow}`, { formulas: ownerFormulas });
@@ -602,6 +589,77 @@ async function resizeTableRows(tableBase, tableRange, targetRows, columnCount) {
     });
   }
   return Math.max(currentRows, targetRows);
+}
+
+function sameHeaders(left, right) {
+  return left.length === right.length && left.every((header, index) => header === right[index]);
+}
+
+async function rebuildTableColumns(tableBase, rows, headers) {
+  const originalColumns = (await graph(`${tableBase}/columns`)).value ?? [];
+  const temporaryNames = headers.map((_, index) => `__NEW_${String(index + 1).padStart(2, "0")}__`);
+
+  // Insert in reverse at index zero so the final physical order matches headers.
+  for (let index = headers.length - 1; index >= 0; index -= 1) {
+    await graph(`${tableBase}/columns/add`, {
+      method: "POST",
+      body: {
+        index: 0,
+        values: [[temporaryNames[index]], ...rows.map((row) => [row[index]])]
+      }
+    });
+  }
+
+  for (const column of [...originalColumns].reverse()) {
+    await graph(`${tableBase}/columns/${encodeURIComponent(column.id)}`, { method: "DELETE" });
+  }
+
+  const rebuiltColumns = (await graph(`${tableBase}/columns`)).value ?? [];
+  for (let index = 0; index < headers.length; index += 1) {
+    const column = rebuiltColumns.find((item) => item.name === temporaryNames[index]);
+    if (!column) throw new Error(`Could not find rebuilt register column ${temporaryNames[index]}.`);
+    await graph(`${tableBase}/columns/${encodeURIComponent(column.id)}`, {
+      method: "PATCH",
+      body: { name: headers[index] }
+    });
+  }
+}
+
+async function formatRegisterZones(root, sheetName, headers, firstColumn, headerRow, lastDataRow) {
+  const firstNumber = columnNumber(firstColumn);
+  const autoVisibleLast = columnName(firstNumber + REGISTER_AUTO_VISIBLE_HEADERS.length - 1);
+  const autoHiddenFirst = columnName(firstNumber + REGISTER_AUTO_VISIBLE_HEADERS.length);
+  const autoHiddenLast = columnName(firstNumber + REGISTER_AUTO_VISIBLE_HEADERS.length + REGISTER_AUTO_HIDDEN_HEADERS.length - 1);
+  const manualFirst = columnName(firstNumber + REGISTER_AUTO_VISIBLE_HEADERS.length + REGISTER_AUTO_HIDDEN_HEADERS.length);
+  const manualLast = columnName(firstNumber + headers.length - 1);
+  const dataFirstRow = headerRow + 1;
+
+  await patchRange(root, sheetName, `${firstColumn}${headerRow}:${manualLast}${lastDataRow}`, { columnHidden: false });
+  await patchRange(root, sheetName, `${autoHiddenFirst}${headerRow}:${autoHiddenLast}${lastDataRow}`, { columnHidden: true });
+
+  await patchRangeFill(root, sheetName, `${firstColumn}${headerRow}:${autoHiddenLast}${headerRow}`, "#1F4E78");
+  await patchRangeFont(root, sheetName, `${firstColumn}${headerRow}:${autoHiddenLast}${headerRow}`, { bold: true, color: "#FFFFFF" });
+  await patchRangeFill(root, sheetName, `${manualFirst}${headerRow}:${manualLast}${headerRow}`, "#7F6000");
+  await patchRangeFont(root, sheetName, `${manualFirst}${headerRow}:${manualLast}${headerRow}`, { bold: true, color: "#FFFFFF" });
+
+  if (lastDataRow >= dataFirstRow) {
+    await patchRangeFill(root, sheetName, `${firstColumn}${dataFirstRow}:${autoVisibleLast}${lastDataRow}`, "#DDEBF7");
+    await patchRangeFill(root, sheetName, `${manualFirst}${dataFirstRow}:${manualLast}${lastDataRow}`, "#FFF2CC");
+  }
+}
+
+async function patchRangeFill(root, sheetName, address, color) {
+  return graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')/format/fill`, {
+    method: "PATCH",
+    body: { color }
+  });
+}
+
+async function patchRangeFont(root, sheetName, address, body) {
+  return graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')/format/font`, {
+    method: "PATCH",
+    body
+  });
 }
 
 async function writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, rows, header, factory, features) {
@@ -654,13 +712,6 @@ function registerBuildingType(value) {
     Community: "Community / sport",
     Infrastructure: "Infrastructure / utilities"
   })[value] ?? value;
-}
-
-function defaultNextAction(priority, stage, builderKnown = false) {
-  if (priority === "High" && !builderKnown) return "Identify builder via tender/network; review plans, cost plan and electrical scope";
-  if (priority === "High") return "Review plans, cost plan and electrical scope";
-  if (stage === "On notification") return "Monitor unless network relevance emerges";
-  return "Review proposal and key documents";
 }
 
 function excelDate(value, includeTime = false) {
