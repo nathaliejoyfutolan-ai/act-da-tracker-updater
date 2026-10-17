@@ -614,10 +614,14 @@ async function verifyReportHealth(root) {
   const errors = [];
   for (const [sheetName, address] of checks) {
     const range = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')`);
-    for (const row of range.values ?? []) {
-      for (const value of row) {
+    const { firstColumn, headerRow: firstRow } = parseRangeAddress(range.address);
+    for (let rowIndex = 0; rowIndex < (range.values ?? []).length; rowIndex += 1) {
+      const row = range.values[rowIndex];
+      for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+        const value = row[columnIndex];
         if (typeof value === "string" && /^#(?:REF|VALUE|NAME|DIV\/0|N\/A|NUM|NULL)!?$/i.test(value.trim())) {
-          errors.push(`${sheetName}!${address}: ${value}`);
+          const cell = `${columnName(columnNumber(firstColumn) + columnIndex)}${firstRow + rowIndex}`;
+          errors.push(`${sheetName}!${cell}: ${value}`);
         }
       }
     }
