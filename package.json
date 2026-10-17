@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "update": "node src/update.mjs"
+    "update": "node src/update.mjs",
+    "inspect-workbook": "node src/inspect-workbook.mjs"
   },
   "engines": {
     "node": ">=20"

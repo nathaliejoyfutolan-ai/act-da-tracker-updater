@@ -5,6 +5,15 @@ on:
     - cron: "3,13,23,33,43,53 * * * *"
     - cron: "17 2 1 * *"
   workflow_dispatch:
+    inputs:
+      operation:
+        description: "Workflow operation"
+        required: true
+        default: "update"
+        type: choice
+        options:
+          - update
+          - inspect
 
 permissions:
   contents: write
@@ -24,10 +33,18 @@ jobs:
           node-version: 22
       - run: npm test
       - run: npm run update
+        if: github.event_name == 'schedule' || inputs.operation == 'update'
         env:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
+      - run: npm run inspect-workbook
+        if: github.event_name == 'workflow_dispatch' && inputs.operation == 'inspect'
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
+          WORKBOOK_INSPECT_KEY: ${{ secrets.WORKBOOK_INSPECT_KEY }}
       - name: Keep the public scheduled workflow active
         if: github.event.schedule == '17 2 1 * *'
         run: |
