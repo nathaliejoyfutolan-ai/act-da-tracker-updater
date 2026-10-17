@@ -58,6 +58,7 @@ const session = await graph(`${root}/createSession`, {
 sessionId = session.id;
 
 try {
+  const documentIndex = await synchroniseDocumentsSheet(root, documentsByDa);
   const tables = await graph(`${root}/worksheets/${encodeURIComponent(SHEET_NAME)}/tables`);
   if (!tables.value?.length) throw new Error(`No table found on worksheet ${SHEET_NAME}.`);
   const tableId = encodeURIComponent(tables.value[0].id);
@@ -91,19 +92,19 @@ try {
     body: { values: rows }
   });
 
-  const registerStats = await synchroniseRegister(root, arcResponse.features, documentsByDa);
+  const registerStats = await synchroniseRegister(root, arcResponse.features, documentsByDa, documentIndex);
   await repairReports(root, rows.length);
   await graph(`${root}/application/calculate`, {
     method: "POST",
     body: { calculationType: "Full" }
   });
 
-  console.log(JSON.stringify({ updatedRows: rows.length, registerRows: rows.length, ...registerStats, updatedAtUtc: new Date().toISOString() }));
+  console.log(JSON.stringify({ updatedRows: rows.length, registerRows: rows.length, documentRows: documentIndex.documentRows, ...registerStats, updatedAtUtc: new Date().toISOString() }));
 } finally {
   await graph(`${root}/closeSession`, { method: "POST", body: {}, tolerate404: true });
 }
 
-async function synchroniseRegister(root, features, documentsByDa) {
+async function synchroniseRegister(root, features, documentsByDa, documentIndex) {
   const sheetName = "DA Register";
   const tables = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/tables`);
   const table = tables.value?.find((item) => item.name === "DARegisterTable");
@@ -122,7 +123,9 @@ async function synchroniseRegister(root, features, documentsByDa) {
     "Document pack",
     "Cost plan document",
     "Document intelligence checked",
-    "Builder source"
+    "Builder source",
+    "Document count",
+    "All documents"
   ];
 
   let tableRange = await graph(`${tableBase}/range`);
@@ -238,7 +241,9 @@ async function synchroniseRegister(root, features, documentsByDa) {
       "Document pack": zipDocument ? documentUrl(zipDocument.name) : "",
       "Cost plan document": costDocument ? documentUrl(costDocument.name) : "",
       "Document intelligence checked": firstNonBlank(intelligence.checked, old("Document intelligence checked")),
-      "Builder source": builderSource
+      "Builder source": builderSource,
+      "Document count": documents.length,
+      "All documents": documentIndex.firstRowByDa.get(daNumber) ? `#'DA Documents'!A${documentIndex.firstRowByDa.get(daNumber)}` : ""
     };
     return headers.map((header) => safeCellValue(sourceValues[header] ?? old(header)));
   });
@@ -267,6 +272,12 @@ async function synchroniseRegister(root, features, documentsByDa) {
   }, features);
   await writeOptionalLinkColumn(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "Document pack", "Open documents");
   await writeOptionalLinkColumn(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "Cost plan document", "Open cost plan");
+  await writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "All documents", ({ feature }) => {
+    const daNumber = textValue(feature.attributes?.DA_NUMBER);
+    const row = documentIndex.firstRowByDa.get(daNumber);
+    const count = documentIndex.countByDa.get(daNumber) ?? 0;
+    return row ? `=HYPERLINK("#'DA Documents'!A${row}","View ${count} documents")` : "";
+  }, features);
   await writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "Days to notification close", ({ row }) =>
     `=IF(E${row}="","",E${row}-TODAY())`, features);
 
@@ -299,20 +310,101 @@ async function synchroniseRegister(root, features, documentsByDa) {
   };
 }
 
+async function synchroniseDocumentsSheet(root, documentsByDa) {
+  const sheetName = "DA Documents";
+  const worksheets = await graph(`${root}/worksheets`);
+  if (!(worksheets.value ?? []).some((sheet) => sheet.name === sheetName)) {
+    await graph(`${root}/worksheets/add`, { method: "POST", body: { name: sheetName } });
+  }
+
+  const headers = ["Record Key", "DA number", "Amendment", "Document type", "Document name", "Size (KB)", "Document URL"];
+  const rows = [];
+  const firstRowByDa = new Map();
+  const countByDa = new Map();
+  const sortedEntries = [...documentsByDa.entries()].sort(([a], [b]) => Number(b) - Number(a));
+  for (const [daNumber, documents] of sortedEntries) {
+    firstRowByDa.set(daNumber, rows.length + 2);
+    countByDa.set(daNumber, documents.length);
+    for (const document of documents) {
+      rows.push([
+        recordKey(daNumber, document.amendment),
+        daNumber,
+        document.amendment,
+        document.type,
+        document.name,
+        document.sizeKb,
+        documentUrl(document.name)
+      ].map(safeCellValue));
+    }
+  }
+
+  const tables = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/tables`);
+  const table = (tables.value ?? []).find((item) => item.name === "DADocumentsTable") ?? tables.value?.[0];
+  const targetLastRow = Math.max(rows.length + 1, 2);
+  let previousLastRow = 2;
+  if (table) {
+    const tableBase = `${root}/tables/${encodeURIComponent(table.id)}`;
+    const currentRange = await graph(`${tableBase}/range`);
+    previousLastRow = currentRange.rowCount;
+    await graph(`${tableBase}/resize`, {
+      method: "POST",
+      body: { newRange: `'${sheetName}'!A1:G${targetLastRow}` }
+    });
+  }
+  await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A1:G${Math.max(previousLastRow, targetLastRow)}')/clear`, {
+    method: "POST",
+    body: { applyTo: "Contents" }
+  });
+  await patchRange(root, sheetName, "A1:G1", { values: [headers] });
+  await patchRowsInChunks(root, sheetName, rows, 2, 1000);
+
+  for (let offset = 0; offset < rows.length; offset += 1000) {
+    const chunk = rows.slice(offset, offset + 1000);
+    const startRow = offset + 2;
+    const endRow = startRow + chunk.length - 1;
+    const daFormulas = chunk.map((row) => [
+      `=HYPERLINK("${formulaText(directApplicationUrl(row[1], row[2]))}","${formulaText(row[1])}")`
+    ]);
+    const documentFormulas = chunk.map((row) => [
+      `=HYPERLINK("${formulaText(row[6])}","${formulaText(row[4])}")`
+    ]);
+    await patchRange(root, sheetName, `B${startRow}:B${endRow}`, { formulas: daFormulas });
+    await patchRange(root, sheetName, `E${startRow}:E${endRow}`, { formulas: documentFormulas });
+  }
+
+  if (!table) {
+    await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/tables/add`, {
+      method: "POST",
+      body: { address: `A1:G${targetLastRow}`, hasHeaders: true }
+    });
+    const newTables = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/tables`);
+    const created = newTables.value?.[0];
+    if (created && created.name !== "DADocumentsTable") {
+      await graph(`${root}/tables/${encodeURIComponent(created.id)}`, {
+        method: "PATCH",
+        body: { name: "DADocumentsTable" }
+      });
+    }
+  }
+  return { firstRowByDa, countByDa, documentRows: rows.length };
+}
+
+async function patchRowsInChunks(root, sheetName, rows, firstRow, chunkSize) {
+  for (let offset = 0; offset < rows.length; offset += chunkSize) {
+    const chunk = rows.slice(offset, offset + chunkSize);
+    const startRow = firstRow + offset;
+    const endRow = startRow + chunk.length - 1;
+    await patchRange(root, sheetName, `A${startRow}:G${endRow}`, { values: chunk });
+  }
+}
+
 async function fetchRelevantDocuments(features) {
   const daNumbers = [...new Set(features.map(({ attributes = {} }) => textValue(attributes.DA_NUMBER)).filter(Boolean))];
   const byDa = new Map();
-  const documentFilter = [
-    "DOCUMENT_TYPE='Bill of quantities'",
-    "DOCUMENT_TYPE='Application Form'",
-    "DOCUMENT_TYPE='Development Outcomes Report'",
-    "DOCUMENT_TYPE='All Attached files in One Zipped File'",
-    "UPPER(DOCUMENT_NAME) LIKE '%COST%'"
-  ].join(" OR ");
   for (let start = 0; start < daNumbers.length; start += 35) {
     const numbers = daNumbers.slice(start, start + 35).map((value) => Number(value)).filter(Number.isFinite);
     if (!numbers.length) continue;
-    const where = `DA_NUMBER IN (${numbers.join(",")}) AND (${documentFilter})`;
+    const where = `DA_NUMBER IN (${numbers.join(",")})`;
     let offset = 0;
     while (true) {
       const url = `${ARC_GIS_DOCUMENT_URL}?${new URLSearchParams({
