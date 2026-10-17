@@ -118,6 +118,7 @@ try {
     method: "POST",
     body: { calculationType: "Full" }
   });
+  await verifyReportHealth(root);
 
   console.log(JSON.stringify({ updatedRows: rows.length, registerRows: rows.length, documentRows: documentIndex.documentRows, ...registerStats, updatedAtUtc: new Date().toISOString() }));
 } finally {
@@ -537,6 +538,9 @@ async function repairReports(root, registerRowCount) {
   await patchRange(root, "Daily Report", "A12:I16", { formulas: dailyRows });
   await patchRange(root, "Daily Report", "I12:I16", { numberFormat: Array.from({ length: 5 }, () => ["dd-mmm-yyyy"]) });
   await patchRange(root, "Daily Report", "H12:H16", { numberFormat: Array.from({ length: 5 }, () => ['"$"#,##0']) });
+  await patchRange(root, "Daily Report", "A5:A5", {
+    formulas: [['=COUNTIF(DARegisterTable[Record Key],"<>")']]
+  });
 
   await patchRange(root, "Daily Report", "J4:J7", { values: [["Under assessment"], ["Lodged"], ["On notification"], [""]] });
   await patchRange(root, "Daily Report", "K4:K7", {
@@ -562,26 +566,63 @@ async function repairReports(root, registerRowCount) {
     ['=COUNTIFS(DARegisterTable[Project budget (AUD)],"<>")&" budgets are recorded, totalling "&TEXT(SUM(DARegisterTable[Project budget (AUD)]),"$#,##0")&"."'],
     ['=COUNTIFS(DARegisterTable[Solar allowance],"Mentioned*")&" applications mention solar; the remaining documents require review."'],
     ['=COUNTIFS(DARegisterTable[Battery allowance],"Mentioned*")&" applications mention battery storage; the remaining documents require review."'],
-    ['=COUNTIFS(DARegisterTable[Tender status],"<>Unknown")&" tender statuses and "&COUNTIFS(DARegisterTable[Proposal status],"<>Not started")&" active proposal statuses are recorded."']
+    ['=COUNTIFS(DARegisterTable[Tender status],"<>",DARegisterTable[Tender status],"<>Unknown")&" tender statuses and "&COUNTIFS(DARegisterTable[Proposal status],"<>",DARegisterTable[Proposal status],"<>Not started")&" active proposal statuses are recorded."']
   ] });
+
+  await patchRange(root, "Summary", "A5:A5", {
+    formulas: [['=COUNTIF(DARegisterTable[Record Key],"<>")']]
+  });
+  await patchRange(root, "Summary", "D5:D5", {
+    formulas: [['=COUNTIFS(DARegisterTable[Record Key],"<>",DARegisterTable[Priority],"High")']]
+  });
+  await patchRange(root, "Summary", "A10:A10", {
+    formulas: [['=COUNTIF(DARegisterTable[Document review],"*Queued*")']]
+  });
+  await patchRange(root, "Summary", "D10:D10", {
+    formulas: [['=COUNTIFS(DARegisterTable[Builder],"<>",DARegisterTable[Builder],"<>Not publicly identified*")']]
+  });
 
   const summaryCriteria = (row) => `((($B$16="All")+(DARegisterTable[Priority]=$B$16))>0)*((($D$16="All")+(DARegisterTable[Stage]=$D$16))>0)*(DARegisterTable[Record Key]<>"")`;
   const summaryIndexed = (header, row) => `INDEX(FILTER(DARegisterTable[${header}],${summaryCriteria(row)}),ROWS($A$20:A${row}))`;
   const count = Math.max(registerRowCount, 1);
-  const ownerFormulas = [];
-  const actionOwnerFormulas = [];
-  const followUpFormulas = [];
+  const summaryRows = [];
   for (let offset = 0; offset < count; offset += 1) {
     const row = 20 + offset;
-    ownerFormulas.push([`=IFERROR(IF(${summaryIndexed("Organisation / developer lead", row)}="","",${summaryIndexed("Organisation / developer lead", row)}),"")`]);
-    actionOwnerFormulas.push([`=IFERROR(IF(${summaryIndexed("Action owner", row)}="","",${summaryIndexed("Action owner", row)}),"")`]);
-    followUpFormulas.push([`=IFERROR(IF(${summaryIndexed("Follow-up due", row)}="","",${summaryIndexed("Follow-up due", row)}),"")`]);
+    summaryRows.push([
+      `=IFERROR(${summaryIndexed("Record Key", row)},"")`,
+      `=IFERROR(${summaryIndexed("DA number", row)},"")`,
+      `=IFERROR(${summaryIndexed("Priority", row)},"")`,
+      `=IFERROR(${summaryIndexed("Stage", row)},"")`,
+      `=IFERROR(${summaryIndexed("Address", row)},"")`,
+      `=IFERROR(IF(${summaryIndexed("Organisation / developer lead", row)}="","",${summaryIndexed("Organisation / developer lead", row)}),"")`,
+      `=IFERROR(IF(${summaryIndexed("Next action", row)}="","",${summaryIndexed("Next action", row)}),"")`,
+      `=IFERROR(IF(${summaryIndexed("Action owner", row)}="","",${summaryIndexed("Action owner", row)}),"")`,
+      `=IFERROR(IF(${summaryIndexed("Follow-up due", row)}="","",${summaryIndexed("Follow-up due", row)}),"")`
+    ]);
   }
   const lastSummaryRow = 19 + count;
-  await patchRange(root, "Summary", `F20:F${lastSummaryRow}`, { formulas: ownerFormulas });
-  await patchRange(root, "Summary", `H20:H${lastSummaryRow}`, { formulas: actionOwnerFormulas });
-  await patchRange(root, "Summary", `I20:I${lastSummaryRow}`, { formulas: followUpFormulas });
+  await patchRange(root, "Summary", `A20:I${lastSummaryRow}`, { formulas: summaryRows });
   await patchRange(root, "Summary", `I20:I${lastSummaryRow}`, { numberFormat: Array.from({ length: count }, () => ["dd-mmm-yyyy"]) });
+}
+
+async function verifyReportHealth(root) {
+  const checks = [
+    ["Summary", "A5:D10"],
+    ["Summary", "A20:I40"],
+    ["Daily Report", "A5:K27"]
+  ];
+  const errors = [];
+  for (const [sheetName, address] of checks) {
+    const range = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')`);
+    for (const row of range.values ?? []) {
+      for (const value of row) {
+        if (typeof value === "string" && /^#(?:REF|VALUE|NAME|DIV\/0|N\/A|NUM|NULL)!?$/i.test(value.trim())) {
+          errors.push(`${sheetName}!${address}: ${value}`);
+        }
+      }
+    }
+  }
+  if (errors.length) throw new Error(`Report verification found formula errors: ${errors.slice(0, 10).join("; ")}`);
 }
 
 async function resizeTableRows(tableBase, tableRange, targetRows, columnCount) {
