@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { classifyBuilding, classifyPriority, directApplicationUrl, normalizeStage, transformFeatures } from "../src/transform.mjs";
+import { extractBudget, extractBuilder, extractEnergyEvidence } from "../src/document-intelligence.mjs";
 
 test("classifies priority opportunities", () => {
   assert.equal(classifyBuilding("new industrial warehouse"), "Warehouse");
@@ -44,4 +45,11 @@ test("normalizes stage labels and creates absolute ACT application links", () =>
   assert.equal(normalizeStage("Under Assessment"), "Under assessment");
   const url = directApplicationUrl("202645643", "S168B");
   assert.equal(new URL(url).searchParams.get("da-number"), "202645643");
+});
+
+test("extracts document intelligence conservatively", () => {
+  const text = `Builder: Example Construction Pty Ltd\nSolar PV included\nConstruction Works Total (Excluding GST)\n9,510 m2\n1,865\n17,735,705`;
+  assert.equal(extractBuilder(text), "Example Construction Pty Ltd");
+  assert.equal(extractBudget(text), 17735705);
+  assert.deepEqual(extractEnergyEvidence(text), ["Solar mentioned in DA documents"]);
 });

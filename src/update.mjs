@@ -5,6 +5,13 @@ import {
   normalizeStage,
   transformFeatures
 } from "./transform.mjs";
+import {
+  documentUrl,
+  extractBudget,
+  extractBuilder,
+  extractEnergyEvidence,
+  reviewPdfDocument
+} from "./document-intelligence.mjs";
 
 const ARC_GIS_FIELDS = [
   "DA_NUMBER", "AMENDMENT_VERSION", "LODGEMENT_DATE", "DATE_START", "DATE_END", "DA_STAGE",
@@ -23,6 +30,7 @@ const ARC_GIS_URL = `https://services1.arcgis.com/E5n4f1VY84i0xSjy/arcgis/rest/s
   resultRecordCount: "2000",
   orderByFields: "LODGEMENT_DATE DESC,DA_NUMBER DESC"
 })}`;
+const ARC_GIS_DOCUMENT_URL = "https://services1.arcgis.com/E5n4f1VY84i0xSjy/arcgis/rest/services/ACTGOV_DAFINDER_DETAILED_VIEW/FeatureServer/0/query";
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const WORKBOOK_PATH = "/ACT_DA_Opportunity_Tracker_Interactive.xlsx";
 const SHEET_NAME = "ACT Live Feed";
@@ -38,6 +46,7 @@ let sessionId = "";
 const arcResponse = await fetchJson(ARC_GIS_URL);
 if (arcResponse.error) throw new Error(`ArcGIS error: ${arcResponse.error.message ?? "Unknown error"}`);
 const rows = transformFeatures(arcResponse.features);
+const documentsByDa = await fetchRelevantDocuments(arcResponse.features);
 if (rows.some((row) => row.length !== COLUMN_COUNT)) throw new Error("Generated row width does not match the workbook table.");
 
 const root = `/me/drive/root:${encodePath(WORKBOOK_PATH)}:/workbook`;
@@ -82,7 +91,7 @@ try {
     body: { values: rows }
   });
 
-  await synchroniseRegister(root, arcResponse.features);
+  await synchroniseRegister(root, arcResponse.features, documentsByDa);
   await repairReports(root, rows.length);
   await graph(`${root}/application/calculate`, {
     method: "POST",
@@ -94,7 +103,7 @@ try {
   await graph(`${root}/closeSession`, { method: "POST", body: {}, tolerate404: true });
 }
 
-async function synchroniseRegister(root, features) {
+async function synchroniseRegister(root, features, documentsByDa) {
   const sheetName = "DA Register";
   const tables = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/tables`);
   const table = tables.value?.find((item) => item.name === "DARegisterTable");
@@ -108,7 +117,11 @@ async function synchroniseRegister(root, features) {
     "Decision",
     "Decision date",
     "Application amended",
-    "Publicly notified"
+    "Publicly notified",
+    "Relevant document count",
+    "Document pack",
+    "Cost plan document",
+    "Document intelligence checked"
   ];
 
   let tableRange = await graph(`${tableBase}/range`);
@@ -135,6 +148,8 @@ async function synchroniseRegister(root, features) {
     if (key) existingByKey.set(key, row);
   }
 
+  const intelligenceByKey = await extractMissingDocumentIntelligence(features, headers, existingByKey, documentsByDa);
+
   const dataRows = features.map(({ attributes: a = {} }) => {
     const daNumber = textValue(a.DA_NUMBER);
     const amendment = textValue(a.AMENDMENT_VERSION);
@@ -147,6 +162,11 @@ async function synchroniseRegister(root, features) {
     const priority = old("Priority") || classifyPriority(classifiedBuilding, proposal);
     const url = directApplicationUrl(daNumber, amendment);
     const organisation = textValue(a.COMPANYORG_NAME);
+    const documents = documentsByDa.get(daNumber) ?? [];
+    const exactDocuments = documentsForVersion(documents, amendment);
+    const costDocument = preferredDocument(documents, amendment, isCostDocument);
+    const zipDocument = preferredDocument(documents, amendment, isZipDocument);
+    const intelligence = intelligenceByKey.get(key) ?? {};
     const projectBudget = firstNonBlank(old("Project Budget"), old("Project budget (AUD)"));
     const sourceValues = {
       "DA number": daNumber,
@@ -165,13 +185,13 @@ async function synchroniseRegister(root, features) {
       Proposal: proposal,
       "Organisation / developer lead": organisation,
       Applicant: textValue(a.APPLICANT_NAME),
-      Builder: old("Builder"),
-      "Project budget (AUD)": firstNonBlank(old("Project budget (AUD)"), projectBudget),
-      "Budget source": old("Budget source") || "Not found in source feed",
-      "Solar allowance": old("Solar allowance") || (proposal.toUpperCase().includes("SOLAR") ? "Mentioned in proposal" : "Not stated - review documents"),
-      "Battery allowance": old("Battery allowance") || (proposal.toUpperCase().includes("BATTERY") ? "Mentioned in proposal" : "Not stated - review documents"),
-      "Solar / battery evidence": old("Solar / battery evidence") || (/(SOLAR|BATTERY)/i.test(proposal) ? "Proposal text" : ""),
-      "Document review": old("Document review") || (priority === "High" ? "Queued" : "Not started"),
+      Builder: firstNonBlank(old("Builder"), intelligence.builder),
+      "Project budget (AUD)": firstNonBlank(old("Project budget (AUD)"), projectBudget, intelligence.budget),
+      "Budget source": firstNonBlank(old("Budget source") === "Not found in source feed" ? "" : old("Budget source"), intelligence.budget ? `DA document: ${costDocument?.name ?? "cost plan"}` : "Not found in source feed"),
+      "Solar allowance": firstNonBlank(old("Solar allowance") === "Not stated - review documents" ? "" : old("Solar allowance"), intelligence.solar ? "Mentioned in DA documents" : "", proposal.toUpperCase().includes("SOLAR") ? "Mentioned in proposal" : "Not stated - review documents"),
+      "Battery allowance": firstNonBlank(old("Battery allowance") === "Not stated - review documents" ? "" : old("Battery allowance"), intelligence.battery ? "Mentioned in DA documents" : "", proposal.toUpperCase().includes("BATTERY") ? "Mentioned in proposal" : "Not stated - review documents"),
+      "Solar / battery evidence": firstNonBlank(old("Solar / battery evidence"), intelligence.energyEvidence, /(SOLAR|BATTERY)/i.test(proposal) ? "Proposal text" : ""),
+      "Document review": firstNonBlank(intelligence.reviewStatus, old("Document review"), priority === "High" ? "Queued" : "Not started"),
       "Next action": old("Next action") || defaultNextAction(priority, normalizeStage(a.DA_STAGE)),
       "Action owner": old("Action owner"),
       "Follow-up status": old("Follow-up status") || "Not contacted",
@@ -189,8 +209,8 @@ async function synchroniseRegister(root, features) {
       "Last contact": old("Last contact"),
       Notes: old("Notes"),
       "Developer / Owner": old("Developer / Owner") || organisation,
-      "Project Budget": projectBudget,
-      Evidence: old("Evidence"),
+      "Project Budget": firstNonBlank(projectBudget, intelligence.budget),
+      Evidence: firstNonBlank(old("Evidence"), intelligence.evidence),
       "Follow-up Date": old("Follow-up Date"),
       "Estimated Fee": old("Estimated Fee"),
       "ACT Application URL": url,
@@ -202,7 +222,11 @@ async function synchroniseRegister(root, features) {
       Decision: textValue(a.DECISION),
       "Decision date": excelDate(a.DECISION_DATE),
       "Application amended": textValue(a.APPLICATION_AMENDED),
-      "Publicly notified": textValue(a.PUBLICLY_NOTIFIED)
+      "Publicly notified": textValue(a.PUBLICLY_NOTIFIED),
+      "Relevant document count": exactDocuments.length,
+      "Document pack": zipDocument ? documentUrl(zipDocument.name) : "",
+      "Cost plan document": costDocument ? documentUrl(costDocument.name) : "",
+      "Document intelligence checked": firstNonBlank(intelligence.checked, old("Document intelligence checked"))
     };
     return headers.map((header) => safeCellValue(sourceValues[header] ?? old(header)));
   });
@@ -229,6 +253,8 @@ async function synchroniseRegister(root, features) {
     const a = feature.attributes ?? {};
     return `=HYPERLINK("${formulaText(directApplicationUrl(a.DA_NUMBER, a.AMENDMENT_VERSION))}","Open DA")`;
   }, features);
+  await writeOptionalLinkColumn(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "Document pack", "Open documents");
+  await writeOptionalLinkColumn(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "Cost plan document", "Open cost plan");
   await writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "Days to notification close", ({ row }) =>
     `=IF(E${row}="","",E${row}-TODAY())`, features);
 
@@ -238,6 +264,141 @@ async function synchroniseRegister(root, features) {
   for (const header of ["Project budget (AUD)", "Project Budget", "Estimated fee (AUD)", "Estimated Fee"]) {
     await setColumnNumberFormat(root, sheetName, headers, firstColumn, firstDataRow, lastDataRow, header, '"$"#,##0');
   }
+
+  // Column A is an orphaned legacy Record Key copy. The actual DARegisterTable starts in column B.
+  if (columnNumber(firstColumn) > 1) {
+    const legacyHeader = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A1:A1')`);
+    if (String(legacyHeader.values?.[0]?.[0] ?? "").trim().toLowerCase() === "record key") {
+      await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A1:A${Math.max(lastDataRow, 1000)}')/clear`, {
+        method: "POST",
+        body: { applyTo: "Contents" }
+      });
+    }
+  }
+}
+
+async function fetchRelevantDocuments(features) {
+  const daNumbers = [...new Set(features.map(({ attributes = {} }) => textValue(attributes.DA_NUMBER)).filter(Boolean))];
+  const byDa = new Map();
+  const documentFilter = [
+    "DOCUMENT_TYPE='Bill of quantities'",
+    "DOCUMENT_TYPE='Application Form'",
+    "DOCUMENT_TYPE='Development Outcomes Report'",
+    "DOCUMENT_TYPE='All Attached files in One Zipped File'",
+    "UPPER(DOCUMENT_NAME) LIKE '%COST%'"
+  ].join(" OR ");
+  for (let start = 0; start < daNumbers.length; start += 35) {
+    const numbers = daNumbers.slice(start, start + 35).map((value) => Number(value)).filter(Number.isFinite);
+    if (!numbers.length) continue;
+    const where = `DA_NUMBER IN (${numbers.join(",")}) AND (${documentFilter})`;
+    let offset = 0;
+    while (true) {
+      const url = `${ARC_GIS_DOCUMENT_URL}?${new URLSearchParams({
+        f: "json",
+        where,
+        outFields: "DA_NUMBER,AMENDMENT_VERSION,DOCUMENT_NAME,DOCUMENT_TYPE,DOCUMENT_SIZE_KB,OBJECTID",
+        returnGeometry: "false",
+        resultOffset: String(offset),
+        resultRecordCount: "2000",
+        orderByFields: "DA_NUMBER,OBJECTID"
+      })}`;
+      const response = await fetchJson(url);
+      if (response.error) throw new Error(`ArcGIS document error: ${response.error.message ?? "Unknown error"}`);
+      const page = response.features ?? [];
+      for (const { attributes: a = {} } of page) {
+        const da = textValue(a.DA_NUMBER);
+        const item = {
+          amendment: textValue(a.AMENDMENT_VERSION),
+          name: textValue(a.DOCUMENT_NAME),
+          type: textValue(a.DOCUMENT_TYPE),
+          sizeKb: numberOrBlank(a.DOCUMENT_SIZE_KB)
+        };
+        if (!byDa.has(da)) byDa.set(da, []);
+        byDa.get(da).push(item);
+      }
+      if (!response.exceededTransferLimit && page.length < 2000) break;
+      offset += page.length;
+      if (!page.length) break;
+    }
+  }
+  return byDa;
+}
+
+async function extractMissingDocumentIntelligence(features, headers, existingByKey, documentsByDa) {
+  const results = new Map();
+  const candidates = [];
+  for (const feature of features) {
+    const a = feature.attributes ?? {};
+    const daNumber = textValue(a.DA_NUMBER);
+    const amendment = textValue(a.AMENDMENT_VERSION);
+    const key = recordKey(daNumber, amendment);
+    const existing = existingByKey.get(key) ?? [];
+    const old = (header) => existing[headers.indexOf(header)] ?? "";
+    const documents = documentsByDa.get(daNumber) ?? [];
+    const cost = preferredDocument(documents, amendment, isCostDocument);
+    const application = preferredDocument(documents, amendment, isApplicationDocument);
+    const relevantCount = documentsForVersion(documents, amendment).length;
+    const unchanged = Number(old("Relevant document count")) === relevantCount && /^Auto-reviewed/.test(textValue(old("Document review")));
+    if (unchanged || (!cost && !application)) continue;
+    candidates.push({
+      key,
+      cost,
+      application,
+      priority: cost ? 0 : normalizeStage(a.DA_STAGE) === "On notification" ? 1 : 2
+    });
+  }
+  candidates.sort((a, b) => a.priority - b.priority);
+  for (const candidate of candidates.slice(0, 10)) {
+    const documents = [...new Map([candidate.cost, candidate.application].filter(Boolean).map((doc) => [doc.name, doc])).values()];
+    let combinedText = "";
+    const reviewed = [];
+    for (const document of documents) {
+      try {
+        const parsed = await reviewPdfDocument(document);
+        combinedText += `\n${parsed.text}`;
+        reviewed.push(document.name);
+      } catch (error) {
+        console.warn(`Could not review ${document.name}: ${error.message}`);
+      }
+    }
+    const budget = extractBudget(combinedText);
+    const builder = extractBuilder(combinedText);
+    const energy = extractEnergyEvidence(combinedText);
+    results.set(candidate.key, {
+      budget,
+      builder,
+      solar: energy.some((value) => value.startsWith("Solar")),
+      battery: energy.some((value) => value.startsWith("Battery")),
+      energyEvidence: energy.join("; "),
+      evidence: reviewed.length ? `Automatically reviewed: ${reviewed.join(", ")}` : "",
+      reviewStatus: reviewed.length ? `Auto-reviewed ${new Date().toISOString().slice(0, 10)}` : "Review queued",
+      checked: reviewed.length ? excelDate(Date.now()) : ""
+    });
+  }
+  return results;
+}
+
+function documentsForVersion(documents, amendment) {
+  const exact = documents.filter((document) => textValue(document.amendment) === textValue(amendment));
+  return exact.length ? exact : documents.filter((document) => !textValue(document.amendment));
+}
+
+function preferredDocument(documents, amendment, predicate) {
+  const exact = documents.filter((document) => textValue(document.amendment) === textValue(amendment) && predicate(document));
+  const base = documents.filter((document) => !textValue(document.amendment) && predicate(document));
+  return exact.at(-1) ?? base.at(-1) ?? documents.filter(predicate).at(-1);
+}
+
+function isCostDocument(document) {
+  return /bill of quantities|cost/i.test(`${document.type} ${document.name}`);
+}
+
+function isApplicationDocument(document) {
+  return /application form/i.test(document.type);
+}
+
+function isZipDocument(document) {
+  return /zipped file/i.test(document.type) || /^ZIPPED-/i.test(document.name);
 }
 
 async function repairReports(root, registerRowCount) {
@@ -328,6 +489,17 @@ async function writeColumnFormulas(root, sheetName, headers, firstColumn, firstD
   if (index < 0 || rows.length === 0) return;
   const column = columnName(columnNumber(firstColumn) + index);
   const formulas = rows.map((_, offset) => [factory({ row: firstDataRow + offset, feature: features[offset] })]);
+  await patchRange(root, sheetName, `${column}${firstDataRow}:${column}${firstDataRow + rows.length - 1}`, { formulas });
+}
+
+async function writeOptionalLinkColumn(root, sheetName, headers, firstColumn, firstDataRow, rows, header, label) {
+  const index = headers.indexOf(header);
+  if (index < 0 || rows.length === 0) return;
+  const column = columnName(columnNumber(firstColumn) + index);
+  const formulas = rows.map((row) => {
+    const value = textValue(row[index]);
+    return [value ? `=HYPERLINK("${formulaText(value)}","${formulaText(label)}")` : ""];
+  });
   await patchRange(root, sheetName, `${column}${firstDataRow}:${column}${firstDataRow + rows.length - 1}`, { formulas });
 }
 
