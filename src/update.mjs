@@ -204,7 +204,7 @@ async function synchroniseRegister(root, features) {
       "Application amended": textValue(a.APPLICATION_AMENDED),
       "Publicly notified": textValue(a.PUBLICLY_NOTIFIED)
     };
-    return headers.map((header) => sourceValues[header] ?? old(header));
+    return headers.map((header) => safeCellValue(sourceValues[header] ?? old(header)));
   });
 
   const writableRowCount = await resizeTableRows(tableBase, tableRange, dataRows.length, headers.length);
@@ -348,7 +348,7 @@ async function patchRange(root, sheetName, address, body) {
 }
 
 function recordKey(daNumber, amendment) {
-  return daNumber ? `${daNumber}|${amendment ? "AMENDMENT" : "BASE"}` : "";
+  return daNumber ? `${daNumber}|${amendment || "BASE"}` : "";
 }
 
 function registerBuildingType(value) {
@@ -390,6 +390,10 @@ function firstNonBlank(...values) {
 
 function formulaText(value) {
   return textValue(value).replaceAll('"', '""');
+}
+
+function safeCellValue(value) {
+  return typeof value === "string" && /^[=+\-@]/.test(value) ? `'${value}` : value;
 }
 
 async function refreshAccessToken() {

@@ -33,7 +33,7 @@ test("maps ArcGIS attributes to the workbook's 28 columns", () => {
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].length, 28);
-  assert.equal(rows[0][0], "202600001|AMENDMENT");
+  assert.equal(rows[0][0], "202600001|A");
   assert.equal(new URL(rows[0][3]).hostname, "www.planning.act.gov.au");
   assert.equal(rows[0][7], "High");
   assert.equal(rows[0][8], "Commercial");

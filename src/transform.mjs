@@ -13,7 +13,7 @@ export function transformFeatures(features) {
     const priority = classifyPriority(buildingType, proposal);
 
     return [
-      `${daNumber}|${amendment ? "AMENDMENT" : "BASE"}`,
+      `${daNumber}|${amendment || "BASE"}`,
       daNumber,
       amendment,
       directApplicationUrl(daNumber, amendment),

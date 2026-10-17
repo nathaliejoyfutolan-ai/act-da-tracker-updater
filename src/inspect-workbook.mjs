@@ -25,7 +25,7 @@ try {
   const requestedRanges = {
     Summary: "A1:Z100",
     "Daily Report": "A1:Z120",
-    "DA Register": "A1:AZ400",
+    "DA Register": "A1:BB400",
     "_Summary Previous": "A1:AZ120",
     Guide: "A1:Z100"
   };
