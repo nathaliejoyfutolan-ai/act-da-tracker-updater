@@ -121,7 +121,8 @@ async function synchroniseRegister(root, features, documentsByDa) {
     "Relevant document count",
     "Document pack",
     "Cost plan document",
-    "Document intelligence checked"
+    "Document intelligence checked",
+    "Builder source"
   ];
 
   let tableRange = await graph(`${tableBase}/range`);
@@ -165,9 +166,17 @@ async function synchroniseRegister(root, features, documentsByDa) {
     const documents = documentsByDa.get(daNumber) ?? [];
     const exactDocuments = documentsForVersion(documents, amendment);
     const costDocument = preferredDocument(documents, amendment, isCostDocument);
+    const applicationDocument = preferredDocument(documents, amendment, isApplicationDocument);
     const zipDocument = preferredDocument(documents, amendment, isZipDocument);
     const intelligence = intelligenceByKey.get(key) ?? {};
     const projectBudget = firstNonBlank(old("Project Budget"), old("Project budget (AUD)"));
+    const previousBuilder = /^Not publicly identified/i.test(textValue(old("Builder"))) ? "" : old("Builder");
+    const builder = firstNonBlank(previousBuilder, intelligence.builder, "Not publicly identified (DA stage)");
+    const builderSource = firstNonBlank(
+      intelligence.builder ? `DA document: ${applicationDocument?.name ?? "public application documents"}` : "",
+      old("Builder source"),
+      previousBuilder ? "Previously recorded" : "Planning ACT application form does not disclose a builder"
+    );
     const sourceValues = {
       "DA number": daNumber,
       Amendment: amendment,
@@ -185,14 +194,16 @@ async function synchroniseRegister(root, features, documentsByDa) {
       Proposal: proposal,
       "Organisation / developer lead": organisation,
       Applicant: textValue(a.APPLICANT_NAME),
-      Builder: firstNonBlank(old("Builder"), intelligence.builder),
+      Builder: builder,
       "Project budget (AUD)": firstNonBlank(old("Project budget (AUD)"), projectBudget, intelligence.budget),
       "Budget source": firstNonBlank(old("Budget source") === "Not found in source feed" ? "" : old("Budget source"), intelligence.budget ? `DA document: ${costDocument?.name ?? "cost plan"}` : "Not found in source feed"),
       "Solar allowance": firstNonBlank(old("Solar allowance") === "Not stated - review documents" ? "" : old("Solar allowance"), intelligence.solar ? "Mentioned in DA documents" : "", proposal.toUpperCase().includes("SOLAR") ? "Mentioned in proposal" : "Not stated - review documents"),
       "Battery allowance": firstNonBlank(old("Battery allowance") === "Not stated - review documents" ? "" : old("Battery allowance"), intelligence.battery ? "Mentioned in DA documents" : "", proposal.toUpperCase().includes("BATTERY") ? "Mentioned in proposal" : "Not stated - review documents"),
       "Solar / battery evidence": firstNonBlank(old("Solar / battery evidence"), intelligence.energyEvidence, /(SOLAR|BATTERY)/i.test(proposal) ? "Proposal text" : ""),
       "Document review": firstNonBlank(intelligence.reviewStatus, old("Document review"), priority === "High" ? "Queued" : "Not started"),
-      "Next action": old("Next action") || defaultNextAction(priority, normalizeStage(a.DA_STAGE)),
+      "Next action": priority === "High" && !previousBuilder && !intelligence.builder && ["", "Review plans, cost plan and electrical scope"].includes(textValue(old("Next action")))
+        ? defaultNextAction(priority, normalizeStage(a.DA_STAGE), false)
+        : old("Next action") || defaultNextAction(priority, normalizeStage(a.DA_STAGE), Boolean(previousBuilder || intelligence.builder)),
       "Action owner": old("Action owner"),
       "Follow-up status": old("Follow-up status") || "Not contacted",
       "Source last updated": excelDate(a.DATECREATED, true),
@@ -226,7 +237,8 @@ async function synchroniseRegister(root, features, documentsByDa) {
       "Relevant document count": exactDocuments.length,
       "Document pack": zipDocument ? documentUrl(zipDocument.name) : "",
       "Cost plan document": costDocument ? documentUrl(costDocument.name) : "",
-      "Document intelligence checked": firstNonBlank(intelligence.checked, old("Document intelligence checked"))
+      "Document intelligence checked": firstNonBlank(intelligence.checked, old("Document intelligence checked")),
+      "Builder source": builderSource
     };
     return headers.map((header) => safeCellValue(sourceValues[header] ?? old(header)));
   });
@@ -347,19 +359,21 @@ async function extractMissingDocumentIntelligence(features, headers, existingByK
     const documents = documentsByDa.get(daNumber) ?? [];
     const cost = preferredDocument(documents, amendment, isCostDocument);
     const application = preferredDocument(documents, amendment, isApplicationDocument);
+    const developmentReport = preferredDocument(documents, amendment, isDevelopmentReport);
     const relevantCount = documentsForVersion(documents, amendment).length;
-    const unchanged = Number(old("Relevant document count")) === relevantCount && /^Auto-reviewed/.test(textValue(old("Document review")));
-    if (unchanged || (!cost && !application)) continue;
+    const unchanged = Number(old("Relevant document count")) === relevantCount && /^Auto-reviewed v2/.test(textValue(old("Document review")));
+    if (unchanged || (!cost && !application && !developmentReport)) continue;
     candidates.push({
       key,
       cost,
       application,
+      developmentReport,
       priority: cost ? 0 : normalizeStage(a.DA_STAGE) === "On notification" ? 1 : 2
     });
   }
   candidates.sort((a, b) => a.priority - b.priority);
   for (const candidate of candidates.slice(0, 10)) {
-    const documents = [...new Map([candidate.cost, candidate.application].filter(Boolean).map((doc) => [doc.name, doc])).values()];
+    const documents = [...new Map([candidate.cost, candidate.application, candidate.developmentReport].filter(Boolean).map((doc) => [doc.name, doc])).values()];
     let combinedText = "";
     const reviewed = [];
     for (const document of documents) {
@@ -381,7 +395,7 @@ async function extractMissingDocumentIntelligence(features, headers, existingByK
       battery: energy.some((value) => value.startsWith("Battery")),
       energyEvidence: energy.join("; "),
       evidence: reviewed.length ? `Automatically reviewed: ${reviewed.join(", ")}` : "",
-      reviewStatus: reviewed.length ? `Auto-reviewed ${new Date().toISOString().slice(0, 10)}` : "Review queued",
+      reviewStatus: reviewed.length ? `Auto-reviewed v2 ${new Date().toISOString().slice(0, 10)}` : "Review queued",
       checked: reviewed.length ? excelDate(Date.now()) : ""
     });
   }
@@ -405,6 +419,10 @@ function isCostDocument(document) {
 
 function isApplicationDocument(document) {
   return /application form/i.test(document.type);
+}
+
+function isDevelopmentReport(document) {
+  return /development outcomes report/i.test(document.type);
 }
 
 function isZipDocument(document) {
@@ -456,7 +474,7 @@ async function repairReports(root, registerRowCount) {
     ['="Tracking "&A5&" current applications across "&COUNTIFS(DARegisterTable[District],"<>")&" populated district records."'],
     ['="See the building-type chart; "&COUNTIFS(DARegisterTable[Building type],"<>")&" applications have a classified building type."'],
     ['=COUNTIFS(DARegisterTable[Developer / Owner],"<>")&" applications have an owner or developer identified."'],
-    ['=COUNTIFS(DARegisterTable[Builder],"<>")&" applications have a builder identified."'],
+    ['=COUNTIFS(DARegisterTable[Builder],"<>",DARegisterTable[Builder],"<>Not publicly identified*")&" applications have a builder publicly identified; the others require tender/network follow-up."'],
     ['=COUNTIFS(DARegisterTable[Project Budget],"<>")&" budgets are recorded, totalling "&TEXT(SUM(DARegisterTable[Project Budget]),"$#,##0")&"."'],
     ['=COUNTIFS(DARegisterTable[Solar allowance],"Mentioned*")&" applications mention solar; the remaining documents require review."'],
     ['=COUNTIFS(DARegisterTable[Battery allowance],"Mentioned*")&" applications mention battery storage; the remaining documents require review."'],
@@ -546,7 +564,8 @@ function registerBuildingType(value) {
   })[value] ?? value;
 }
 
-function defaultNextAction(priority, stage) {
+function defaultNextAction(priority, stage, builderKnown = false) {
+  if (priority === "High" && !builderKnown) return "Identify builder via tender/network; review plans, cost plan and electrical scope";
   if (priority === "High") return "Review plans, cost plan and electrical scope";
   if (stage === "On notification") return "Monitor unless network relevance emerges";
   return "Review proposal and key documents";
