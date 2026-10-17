@@ -334,10 +334,15 @@ async function synchroniseDocumentsSheet(root, documentsByDa) {
     const tableBase = `${root}/tables/${encodeURIComponent(table.id)}`;
     const currentRange = await graph(`${tableBase}/range`);
     previousLastRow = currentRange.rowCount;
-    await graph(`${tableBase}/resize`, {
-      method: "POST",
-      body: { newRange: `'${sheetName}'!A1:G${targetLastRow}` }
-    });
+    let rowsToAdd = rows.length - (currentRange.rowCount - 1);
+    while (rowsToAdd > 0) {
+      const chunkSize = Math.min(rowsToAdd, 1000);
+      await graph(`${tableBase}/rows/add`, {
+        method: "POST",
+        body: { index: null, values: Array.from({ length: chunkSize }, () => Array(headers.length).fill("")) }
+      });
+      rowsToAdd -= chunkSize;
+    }
   }
   await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A1:G${Math.max(previousLastRow, targetLastRow)}')/clear`, {
     method: "POST",
