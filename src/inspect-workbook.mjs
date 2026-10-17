@@ -25,12 +25,13 @@ try {
   const requestedRanges = {
     Summary: "A1:Z100",
     "Daily Report": "A1:Z120",
-    "DA Register": "A1:AB400",
-    "Summary Previous": "A1:Z100",
+    "DA Register": "A1:AZ400",
+    "_Summary Previous": "A1:AZ120",
     Guide: "A1:Z100"
   };
   const ranges = {};
   const charts = {};
+  const tables = {};
 
   for (const [sheetName, address] of Object.entries(requestedRanges)) {
     if (!sheetNames.includes(sheetName)) continue;
@@ -38,9 +39,10 @@ try {
       `${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')`
     );
     charts[sheetName] = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/charts`);
+    tables[sheetName] = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/tables`);
   }
 
-  const payload = JSON.stringify({ sheetNames, ranges, charts });
+  const payload = JSON.stringify({ sheetNames, ranges, charts, tables });
   await fs.promises.writeFile("/tmp/workbook-inspection.enc", encrypt(payload, process.env.WORKBOOK_INSPECT_KEY));
   console.log("Encrypted workbook inspection created.");
 } finally {
