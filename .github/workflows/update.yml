@@ -1,0 +1,26 @@
+name: Update ACT DA tracker
+
+on:
+  schedule:
+    - cron: "3,13,23,33,43,53 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: act-da-tracker-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - run: npm run update
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
