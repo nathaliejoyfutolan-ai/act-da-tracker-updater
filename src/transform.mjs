@@ -13,13 +13,13 @@ export function transformFeatures(features) {
     const priority = classifyPriority(buildingType, proposal);
 
     return [
-      amendment ? `${daNumber}|${amendment}` : daNumber,
+      `${daNumber}|${amendment ? "AMENDMENT" : "BASE"}`,
       daNumber,
       amendment,
-      DETAIL_URL,
+      directApplicationUrl(daNumber, amendment),
       dateOnly(a.LODGEMENT_DATE),
       dateOnly(a.DATE_END),
-      text(a.DA_STAGE),
+      normalizeStage(a.DA_STAGE),
       priority,
       buildingType,
       text(a.DISTRICT),
@@ -43,6 +43,22 @@ export function transformFeatures(features) {
       ""
     ];
   });
+}
+
+export function directApplicationUrl(daNumber, amendment = "") {
+  const url = new URL(`${DETAIL_URL}/development-application-details`);
+  url.searchParams.set("da-number", text(daNumber));
+  url.searchParams.set("amendment-version", text(amendment));
+  return url.toString();
+}
+
+export function normalizeStage(value) {
+  const stage = text(value).trim();
+  if (stage.toLowerCase() === "under assessment") return "Under assessment";
+  if (stage.toLowerCase() === "on notification") return "On notification";
+  if (stage.toLowerCase() === "lodged") return "Lodged";
+  if (stage.toLowerCase() === "decided") return "Decided";
+  return stage;
 }
 
 function text(value) {

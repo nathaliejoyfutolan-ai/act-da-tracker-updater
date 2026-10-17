@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyBuilding, classifyPriority, transformFeatures } from "../src/transform.mjs";
+import { classifyBuilding, classifyPriority, directApplicationUrl, normalizeStage, transformFeatures } from "../src/transform.mjs";
 
 test("classifies priority opportunities", () => {
   assert.equal(classifyBuilding("new industrial warehouse"), "Warehouse");
@@ -33,8 +33,15 @@ test("maps ArcGIS attributes to the workbook's 28 columns", () => {
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].length, 28);
-  assert.equal(rows[0][0], "202600001|A");
+  assert.equal(rows[0][0], "202600001|AMENDMENT");
+  assert.equal(new URL(rows[0][3]).hostname, "www.planning.act.gov.au");
   assert.equal(rows[0][7], "High");
   assert.equal(rows[0][8], "Commercial");
   assert.equal(rows[0][20], "2026-01-02 03:04");
+});
+
+test("normalizes stage labels and creates absolute ACT application links", () => {
+  assert.equal(normalizeStage("Under Assessment"), "Under assessment");
+  const url = directApplicationUrl("202645643", "S168B");
+  assert.equal(new URL(url).searchParams.get("da-number"), "202645643");
 });

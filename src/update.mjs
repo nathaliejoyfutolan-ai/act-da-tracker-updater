@@ -1,6 +1,28 @@
-import { transformFeatures } from "./transform.mjs";
+import {
+  classifyBuilding,
+  classifyPriority,
+  directApplicationUrl,
+  normalizeStage,
+  transformFeatures
+} from "./transform.mjs";
 
-const ARC_GIS_URL = "https://services1.arcgis.com/E5n4f1VY84i0xSjy/arcgis/rest/services/ACTGOV_DAFINDER_LIST_VIEW/FeatureServer/0/query?f=json&where=DA_STAGE%20%3C%3E%20%27Decided%27&outFields=DA_NUMBER%2CAMENDMENT_VERSION%2CLODGEMENT_DATE%2CDATE_END%2CDA_STAGE%2CAPPLICATION_TYPE%2CAPPLICATION_SUB_TYPE%2CDISTRICT%2CSUBURB%2CSTREET_ADDRESS%2CBLOCK%2CSECTION%2CPROPOSAL_TEXT%2CCOMPANYORG_NAME%2CAPPLICANT_NAME%2CDATECREATED%2CCENTROID_LAT%2CCENTROID_LONG%2COBJECTID&returnGeometry=false&resultRecordCount=2000&orderByFields=LODGEMENT_DATE%20DESC%2CDA_NUMBER%20DESC";
+const ARC_GIS_FIELDS = [
+  "DA_NUMBER", "AMENDMENT_VERSION", "LODGEMENT_DATE", "DATE_START", "DATE_END", "DA_STAGE",
+  "APPLICATION_TYPE", "APPLICATION_SUB_TYPE", "DISTRICT", "SUBURB", "STREET_ADDRESS", "BLOCK",
+  "SECTION", "BLOCK_KEY", "PROPOSAL_TEXT", "COMPANYORG_NAME", "APPLICANT_NAME", "DECISION", "DECISION_DATE",
+  "DATECREATED", "PUBLICLY_NOTIFIED", "APPLICATION_AMENDED", "APPLICATION_CORRECTED",
+  "REPRESENTATION_MADE", "NOT_NOTIFIED_REASON", "REASON_EXTENSION_PERIOD", "RECONSIDERATION",
+  "ACAT_REVIEW", "REPRESENTATION_COUNT", "PRE_DECISION_ADVICE_DATE", "PREDECISION_DUE_DATE",
+  "COMMENTS", "ENTITY_ADVICE", "CENTROID_LAT", "CENTROID_LONG", "OBJECTID"
+];
+const ARC_GIS_URL = `https://services1.arcgis.com/E5n4f1VY84i0xSjy/arcgis/rest/services/ACTGOV_DAFINDER_LIST_VIEW/FeatureServer/0/query?${new URLSearchParams({
+  f: "json",
+  where: "DA_STAGE <> 'Decided'",
+  outFields: ARC_GIS_FIELDS.join(","),
+  returnGeometry: "false",
+  resultRecordCount: "2000",
+  orderByFields: "LODGEMENT_DATE DESC,DA_NUMBER DESC"
+})}`;
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const WORKBOOK_PATH = "/ACT_DA_Opportunity_Tracker_Interactive.xlsx";
 const SHEET_NAME = "ACT Live Feed";
@@ -59,14 +81,315 @@ try {
     method: "PATCH",
     body: { values: rows }
   });
+
+  await synchroniseRegister(root, arcResponse.features);
+  await repairReports(root, rows.length);
   await graph(`${root}/application/calculate`, {
     method: "POST",
     body: { calculationType: "Full" }
   });
 
-  console.log(JSON.stringify({ updatedRows: rows.length, updatedAtUtc: new Date().toISOString() }));
+  console.log(JSON.stringify({ updatedRows: rows.length, registerRows: rows.length, updatedAtUtc: new Date().toISOString() }));
 } finally {
   await graph(`${root}/closeSession`, { method: "POST", body: {}, tolerate404: true });
+}
+
+async function synchroniseRegister(root, features) {
+  const sheetName = "DA Register";
+  const tables = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/tables`);
+  const table = tables.value?.find((item) => item.name === "DARegisterTable");
+  if (!table) throw new Error("DARegisterTable was not found.");
+  const tableBase = `${root}/tables/${encodeURIComponent(table.id)}`;
+  const addedHeaders = [
+    "Application type",
+    "Application subtype",
+    "Block key",
+    "Representation starts",
+    "Decision",
+    "Decision date",
+    "Application amended",
+    "Publicly notified"
+  ];
+
+  let tableRange = await graph(`${tableBase}/range`);
+  let headers = tableRange.values?.[0] ?? [];
+  for (const header of addedHeaders) {
+    if (headers.includes(header)) continue;
+    await graph(`${tableBase}/columns/add`, {
+      method: "POST",
+      body: { name: header }
+    });
+    tableRange = await graph(`${tableBase}/range`);
+    headers = tableRange.values?.[0] ?? [];
+  }
+
+  const existingRows = (tableRange.values ?? []).slice(1);
+  const existingByKey = new Map();
+  const keyIndex = headers.indexOf("Record Key");
+  const daIndex = headers.indexOf("DA number");
+  const amendmentIndex = headers.indexOf("Amendment");
+  for (const row of existingRows) {
+    const daNumber = textValue(row[daIndex]);
+    const amendment = textValue(row[amendmentIndex]);
+    const key = textValue(row[keyIndex]) || recordKey(daNumber, amendment);
+    if (key) existingByKey.set(key, row);
+  }
+
+  const dataRows = features.map(({ attributes: a = {} }) => {
+    const daNumber = textValue(a.DA_NUMBER);
+    const amendment = textValue(a.AMENDMENT_VERSION);
+    const key = recordKey(daNumber, amendment);
+    const existing = existingByKey.get(key) ?? [];
+    const old = (header) => existing[headers.indexOf(header)] ?? "";
+    const proposal = textValue(a.PROPOSAL_TEXT);
+    const classifiedBuilding = classifyBuilding(`${textValue(a.APPLICATION_TYPE)} ${textValue(a.APPLICATION_SUB_TYPE)} ${proposal}`);
+    const buildingType = old("Building type") || registerBuildingType(classifiedBuilding);
+    const priority = old("Priority") || classifyPriority(classifiedBuilding, proposal);
+    const url = directApplicationUrl(daNumber, amendment);
+    const organisation = textValue(a.COMPANYORG_NAME);
+    const projectBudget = firstNonBlank(old("Project Budget"), old("Project budget (AUD)"));
+    const sourceValues = {
+      "DA number": daNumber,
+      Amendment: amendment,
+      "DA detail URL": url,
+      Lodged: excelDate(a.LODGEMENT_DATE),
+      "Notification closes": excelDate(a.DATE_END),
+      Stage: normalizeStage(a.DA_STAGE),
+      Priority: priority,
+      "Building type": buildingType,
+      District: textValue(a.DISTRICT),
+      Suburb: textValue(a.SUBURB),
+      Address: textValue(a.STREET_ADDRESS),
+      Block: numberOrBlank(a.BLOCK),
+      Section: numberOrBlank(a.SECTION),
+      Proposal: proposal,
+      "Organisation / developer lead": organisation,
+      Applicant: textValue(a.APPLICANT_NAME),
+      Builder: old("Builder"),
+      "Project budget (AUD)": firstNonBlank(old("Project budget (AUD)"), projectBudget),
+      "Budget source": old("Budget source") || "Not found in source feed",
+      "Solar allowance": old("Solar allowance") || (proposal.toUpperCase().includes("SOLAR") ? "Mentioned in proposal" : "Not stated - review documents"),
+      "Battery allowance": old("Battery allowance") || (proposal.toUpperCase().includes("BATTERY") ? "Mentioned in proposal" : "Not stated - review documents"),
+      "Solar / battery evidence": old("Solar / battery evidence") || (/(SOLAR|BATTERY)/i.test(proposal) ? "Proposal text" : ""),
+      "Document review": old("Document review") || (priority === "High" ? "Queued" : "Not started"),
+      "Next action": old("Next action") || defaultNextAction(priority, normalizeStage(a.DA_STAGE)),
+      "Action owner": old("Action owner"),
+      "Follow-up status": old("Follow-up status") || "Not contacted",
+      "Source last updated": excelDate(a.DATECREATED, true),
+      "Last checked": excelDate(Date.now()),
+      Latitude: numberOrBlank(a.CENTROID_LAT),
+      Longitude: numberOrBlank(a.CENTROID_LONG),
+      "Days to notification close": "",
+      "Review due": old("Review due"),
+      "Follow-up due": old("Follow-up due"),
+      "Tender status": old("Tender status") || "Unknown",
+      "Proposal status": old("Proposal status") || "Not started",
+      "Estimated fee (AUD)": old("Estimated fee (AUD)"),
+      "Relationship / contact": old("Relationship / contact"),
+      "Last contact": old("Last contact"),
+      Notes: old("Notes"),
+      "Developer / Owner": old("Developer / Owner") || organisation,
+      "Project Budget": projectBudget,
+      Evidence: old("Evidence"),
+      "Follow-up Date": old("Follow-up Date"),
+      "Estimated Fee": old("Estimated Fee"),
+      "ACT Application URL": url,
+      "Record Key": key,
+      "Application type": textValue(a.APPLICATION_TYPE),
+      "Application subtype": textValue(a.APPLICATION_SUB_TYPE),
+      "Block key": numberOrBlank(a.BLOCK_KEY),
+      "Representation starts": excelDate(a.DATE_START),
+      Decision: textValue(a.DECISION),
+      "Decision date": excelDate(a.DECISION_DATE),
+      "Application amended": textValue(a.APPLICATION_AMENDED),
+      "Publicly notified": textValue(a.PUBLICLY_NOTIFIED)
+    };
+    return headers.map((header) => sourceValues[header] ?? old(header));
+  });
+
+  await resizeTableRows(tableBase, tableRange, dataRows.length, headers.length);
+  tableRange = await graph(`${tableBase}/range`);
+  const { firstColumn, headerRow } = parseRangeAddress(tableRange.address);
+  const firstDataRow = headerRow + 1;
+  const lastDataRow = firstDataRow + dataRows.length - 1;
+  const lastColumn = columnName(columnNumber(firstColumn) + headers.length - 1);
+  await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='${firstColumn}${firstDataRow}:${lastColumn}${lastDataRow}')`, {
+    method: "PATCH",
+    body: { values: dataRows }
+  });
+
+  await writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "DA number", ({ row, feature }) => {
+    const a = feature.attributes ?? {};
+    return `=HYPERLINK("${formulaText(directApplicationUrl(a.DA_NUMBER, a.AMENDMENT_VERSION))}","${formulaText(a.DA_NUMBER)}")`;
+  }, features);
+  await writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "DA detail URL", ({ feature }) => {
+    const a = feature.attributes ?? {};
+    return `=HYPERLINK("${formulaText(directApplicationUrl(a.DA_NUMBER, a.AMENDMENT_VERSION))}","Open DA")`;
+  }, features);
+  await writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "Days to notification close", ({ row }) =>
+    `=IF(E${row}="","",E${row}-TODAY())`, features);
+
+  for (const header of ["Lodged", "Notification closes", "Last checked", "Last contact", "Follow-up Date", "Representation starts", "Decision date"]) {
+    await setColumnNumberFormat(root, sheetName, headers, firstColumn, firstDataRow, lastDataRow, header, "dd-mmm-yyyy");
+  }
+  for (const header of ["Project budget (AUD)", "Project Budget", "Estimated fee (AUD)", "Estimated Fee"]) {
+    await setColumnNumberFormat(root, sheetName, headers, firstColumn, firstDataRow, lastDataRow, header, '"$"#,##0');
+  }
+}
+
+async function repairReports(root, registerRowCount) {
+  const criteria = '(DARegisterTable[Record Key]<>"")*(DARegisterTable[Priority]="High")';
+  const indexed = (header, row) => `INDEX(FILTER(DARegisterTable[${header}],${criteria}),ROWS($A$12:A${row}))`;
+  const guarded = (header, row) => `IF(${indexed(header, row)}="","",${indexed(header, row)})`;
+  const dailyRows = Array.from({ length: 5 }, (_, offset) => {
+    const row = 12 + offset;
+    return [
+      `=IFERROR(HYPERLINK(${indexed("ACT Application URL", row)},${indexed("DA number", row)}),"")`,
+      `=IFERROR(${indexed("Stage", row)},"")`,
+      `=IFERROR(${indexed("Address", row)},"")`,
+      `=IFERROR(${guarded("Proposal", row)},"")`,
+      `=IFERROR(${guarded("Building type", row)},"")`,
+      `=IFERROR(${guarded("Developer / Owner", row)},"")`,
+      `=IFERROR(${guarded("Builder", row)},"")`,
+      `=IFERROR(${guarded("Project Budget", row)},"")`,
+      `=IFERROR(${guarded("Follow-up Date", row)},"")`
+    ];
+  });
+  await patchRange(root, "Daily Report", "A11:I11", {
+    values: [["DA Number", "Stage", "Project / Address", "Proposal", "Building type", "Developer / Owner", "Builder", "Project Budget", "Follow-up Date"]]
+  });
+  await patchRange(root, "Daily Report", "A12:I16", { formulas: dailyRows });
+  await patchRange(root, "Daily Report", "I12:I16", { numberFormat: Array.from({ length: 5 }, () => ["dd-mmm-yyyy"]) });
+  await patchRange(root, "Daily Report", "H12:H16", { numberFormat: Array.from({ length: 5 }, () => ['"$"#,##0']) });
+
+  await patchRange(root, "Daily Report", "J4:J7", { values: [["Under assessment"], ["Lodged"], ["On notification"], [""]] });
+  await patchRange(root, "Daily Report", "K4:K7", {
+    formulas: [["=COUNTIFS(DARegisterTable[Stage],J4)"], ["=COUNTIFS(DARegisterTable[Stage],J5)"], ["=COUNTIFS(DARegisterTable[Stage],J6)"], [""]]
+  });
+
+  await patchRange(root, "Daily Report", "A19:A27", { values: [
+    ["Bilal's daily market questions"],
+    ["What is happening around the ACT?"],
+    ["What buildings are coming up?"],
+    ["Which owners or developers are identified?"],
+    ["Which builders are identified?"],
+    ["Which project budgets are known?"],
+    ["Is solar allowed for?"],
+    ["Is battery storage allowed for?"],
+    ["What is happening with tenders and proposals?"]
+  ] });
+  await patchRange(root, "Daily Report", "D20:D27", { formulas: [
+    ['="Tracking "&A5&" current applications across "&COUNTIFS(DARegisterTable[District],"<>")&" populated district records."'],
+    ['="See the building-type chart; "&COUNTIFS(DARegisterTable[Building type],"<>")&" applications have a classified building type."'],
+    ['=COUNTIFS(DARegisterTable[Developer / Owner],"<>")&" applications have an owner or developer identified."'],
+    ['=COUNTIFS(DARegisterTable[Builder],"<>")&" applications have a builder identified."'],
+    ['=COUNTIFS(DARegisterTable[Project Budget],"<>")&" budgets are recorded, totalling "&TEXT(SUM(DARegisterTable[Project Budget]),"$#,##0")&"."'],
+    ['=COUNTIFS(DARegisterTable[Solar allowance],"Mentioned*")&" applications mention solar; the remaining documents require review."'],
+    ['=COUNTIFS(DARegisterTable[Battery allowance],"Mentioned*")&" applications mention battery storage; the remaining documents require review."'],
+    ['=COUNTIFS(DARegisterTable[Tender status],"<>Unknown")&" tender statuses and "&COUNTIFS(DARegisterTable[Proposal status],"<>Not started")&" active proposal statuses are recorded."']
+  ] });
+
+  const summaryCriteria = (row) => `((($B$16="All")+(DARegisterTable[Priority]=$B$16))>0)*((($D$16="All")+(DARegisterTable[Stage]=$D$16))>0)*(DARegisterTable[Record Key]<>"")`;
+  const summaryIndexed = (header, row) => `INDEX(FILTER(DARegisterTable[${header}],${summaryCriteria(row)}),ROWS($A$20:A${row}))`;
+  const count = Math.max(registerRowCount, 1);
+  const ownerFormulas = [];
+  const actionOwnerFormulas = [];
+  const followUpFormulas = [];
+  for (let offset = 0; offset < count; offset += 1) {
+    const row = 20 + offset;
+    ownerFormulas.push([`=IFERROR(IF(${summaryIndexed("Developer / Owner", row)}="","",${summaryIndexed("Developer / Owner", row)}),"")`]);
+    actionOwnerFormulas.push([`=IFERROR(IF(${summaryIndexed("Action owner", row)}="","",${summaryIndexed("Action owner", row)}),"")`]);
+    followUpFormulas.push([`=IFERROR(IF(${summaryIndexed("Follow-up Date", row)}="","",${summaryIndexed("Follow-up Date", row)}),"")`]);
+  }
+  const lastSummaryRow = 19 + count;
+  await patchRange(root, "Summary", `F20:F${lastSummaryRow}`, { formulas: ownerFormulas });
+  await patchRange(root, "Summary", `H20:H${lastSummaryRow}`, { formulas: actionOwnerFormulas });
+  await patchRange(root, "Summary", `I20:I${lastSummaryRow}`, { formulas: followUpFormulas });
+  await patchRange(root, "Summary", `I20:I${lastSummaryRow}`, { numberFormat: Array.from({ length: count }, () => ["dd-mmm-yyyy"]) });
+}
+
+async function resizeTableRows(tableBase, tableRange, targetRows, columnCount) {
+  const currentRows = tableRange.rowCount - 1;
+  const difference = targetRows - currentRows;
+  if (difference > 0) {
+    await graph(`${tableBase}/rows/add`, {
+      method: "POST",
+      body: { index: null, values: Array.from({ length: difference }, () => Array(columnCount).fill("")) }
+    });
+  } else if (difference < 0) {
+    for (let index = currentRows - 1; index >= targetRows; index -= 1) {
+      await graph(`${tableBase}/rows/${index}`, { method: "DELETE" });
+    }
+  }
+}
+
+async function writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, rows, header, factory, features) {
+  const index = headers.indexOf(header);
+  if (index < 0 || rows.length === 0) return;
+  const column = columnName(columnNumber(firstColumn) + index);
+  const formulas = rows.map((_, offset) => [factory({ row: firstDataRow + offset, feature: features[offset] })]);
+  await patchRange(root, sheetName, `${column}${firstDataRow}:${column}${firstDataRow + rows.length - 1}`, { formulas });
+}
+
+async function setColumnNumberFormat(root, sheetName, headers, firstColumn, firstDataRow, lastDataRow, header, format) {
+  const index = headers.indexOf(header);
+  if (index < 0) return;
+  const column = columnName(columnNumber(firstColumn) + index);
+  await patchRange(root, sheetName, `${column}${firstDataRow}:${column}${lastDataRow}`, {
+    numberFormat: Array.from({ length: lastDataRow - firstDataRow + 1 }, () => [format])
+  });
+}
+
+async function patchRange(root, sheetName, address, body) {
+  return graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')`, {
+    method: "PATCH",
+    body
+  });
+}
+
+function recordKey(daNumber, amendment) {
+  return daNumber ? `${daNumber}|${amendment ? "AMENDMENT" : "BASE"}` : "";
+}
+
+function registerBuildingType(value) {
+  return ({
+    Warehouse: "Warehouse / industrial",
+    Apartments: "Apartments / multi-unit",
+    Commercial: "Commercial / office",
+    Retail: "Retail / hospitality",
+    Education: "Education / childcare",
+    Health: "Health / aged care",
+    Community: "Community / sport",
+    Infrastructure: "Infrastructure / utilities"
+  })[value] ?? value;
+}
+
+function defaultNextAction(priority, stage) {
+  if (priority === "High") return "Review plans, cost plan and electrical scope";
+  if (stage === "On notification") return "Monitor unless network relevance emerges";
+  return "Review proposal and key documents";
+}
+
+function excelDate(value, includeTime = false) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "";
+  const serial = value / 86400000 + 25569;
+  return includeTime ? serial : Math.floor(serial);
+}
+
+function numberOrBlank(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : "";
+}
+
+function textValue(value) {
+  return value === null || value === undefined ? "" : String(value).trim();
+}
+
+function firstNonBlank(...values) {
+  return values.find((value) => value !== "" && value !== null && value !== undefined) ?? "";
+}
+
+function formulaText(value) {
+  return textValue(value).replaceAll('"', '""');
 }
 
 async function refreshAccessToken() {
