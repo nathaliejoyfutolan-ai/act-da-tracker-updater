@@ -207,15 +207,18 @@ async function synchroniseRegister(root, features) {
     return headers.map((header) => sourceValues[header] ?? old(header));
   });
 
-  await resizeTableRows(tableBase, tableRange, dataRows.length, headers.length);
+  const writableRowCount = await resizeTableRows(tableBase, tableRange, dataRows.length, headers.length);
+  const rowsToWrite = dataRows.concat(
+    Array.from({ length: writableRowCount - dataRows.length }, () => Array(headers.length).fill(""))
+  );
   tableRange = await graph(`${tableBase}/range`);
   const { firstColumn, headerRow } = parseRangeAddress(tableRange.address);
   const firstDataRow = headerRow + 1;
-  const lastDataRow = firstDataRow + dataRows.length - 1;
+  const lastDataRow = firstDataRow + rowsToWrite.length - 1;
   const lastColumn = columnName(columnNumber(firstColumn) + headers.length - 1);
   await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='${firstColumn}${firstDataRow}:${lastColumn}${lastDataRow}')`, {
     method: "PATCH",
-    body: { values: dataRows }
+    body: { values: rowsToWrite }
   });
 
   await writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, dataRows, "DA number", ({ row, feature }) => {
@@ -316,11 +319,8 @@ async function resizeTableRows(tableBase, tableRange, targetRows, columnCount) {
       method: "POST",
       body: { index: null, values: Array.from({ length: difference }, () => Array(columnCount).fill("")) }
     });
-  } else if (difference < 0) {
-    for (let index = currentRows - 1; index >= targetRows; index -= 1) {
-      await graph(`${tableBase}/rows/${index}`, { method: "DELETE" });
-    }
   }
+  return Math.max(currentRows, targetRows);
 }
 
 async function writeColumnFormulas(root, sheetName, headers, firstColumn, firstDataRow, rows, header, factory, features) {
