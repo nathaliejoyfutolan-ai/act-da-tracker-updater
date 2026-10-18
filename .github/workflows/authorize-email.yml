@@ -25,6 +25,12 @@ jobs:
         env:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+      - name: Publish the short-lived authorization code
+        uses: actions/upload-artifact@v4
+        with:
+          name: email-device-code
+          path: /tmp/email-device-code.json
+          retention-days: 1
       - name: Wait for Microsoft approval
         run: node src/authorize-email.mjs
         env:
