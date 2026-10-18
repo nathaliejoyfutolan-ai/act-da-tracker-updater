@@ -20,7 +20,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Authorize Microsoft email access
+      - name: Start Microsoft authorization
+        run: node src/start-email-authorization.mjs
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+      - name: Wait for Microsoft approval
         run: node src/authorize-email.mjs
         env:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
