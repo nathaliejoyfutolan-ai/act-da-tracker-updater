@@ -11,3 +11,7 @@ Required encrypted repository secrets:
 - `MS_REFRESH_TOKEN`
 
 The workflow also supports a manual run from the Actions tab.
+
+The `Email ACT DA daily report` workflow refreshes the workbook and emails the Daily Report to
+`nathalie@decarbysolar.com.au` at 5:30 AM Philippine time each day. Its Microsoft delegated
+permissions must include `Mail.Send` in addition to the workbook permissions above.

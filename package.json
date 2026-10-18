@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node --test",
     "update": "node src/update.mjs",
+    "email-daily-report": "node src/email-daily-report.mjs",
     "inspect-workbook": "node src/inspect-workbook.mjs"
   },
   "engines": {

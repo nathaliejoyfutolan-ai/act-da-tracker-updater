@@ -1,0 +1,40 @@
+name: Email ACT DA daily report
+
+on:
+  schedule:
+    # 21:30 UTC is 05:30 the following day in the Philippines (UTC+8).
+    - cron: "30 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: act-da-daily-report
+  cancel-in-progress: false
+
+jobs:
+  refresh-and-email:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Refresh the ACT DA tracker
+        run: npm run update
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
+      - name: Email the Daily Report
+        run: npm run email-daily-report
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
+          REPORT_RECIPIENT: nathalie@decarbysolar.com.au
