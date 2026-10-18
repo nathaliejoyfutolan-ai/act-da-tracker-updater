@@ -18,6 +18,12 @@ const device = await deviceResponse.json();
 console.log("\nMICROSOFT AUTHORIZATION REQUIRED");
 console.log(device.message);
 console.log("Keep this workflow running while authorization is completed.\n");
+if (process.env.GITHUB_STEP_SUMMARY) {
+  fs.appendFileSync(
+    process.env.GITHUB_STEP_SUMMARY,
+    `## Microsoft authorization required\n\nOpen [microsoft.com/devicelogin](${device.verification_uri}) and enter code **${device.user_code}**.\n\nKeep this workflow running until authorization completes.\n`
+  );
+}
 
 let intervalSeconds = Number(device.interval ?? 5);
 const deadline = Date.now() + Number(device.expires_in ?? 900) * 1000;
