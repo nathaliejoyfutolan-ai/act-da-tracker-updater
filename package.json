@@ -7,12 +7,14 @@
     "test": "node --test",
     "update": "node src/update.mjs",
     "email-daily-report": "node src/email-daily-report.mjs",
-    "inspect-workbook": "node src/inspect-workbook.mjs"
+    "inspect-workbook": "node src/inspect-workbook.mjs",
+    "awards-monitor": "node src/awards-monitor.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "adm-zip": "^0.5.18",
     "pdf-parse": "^1.1.1"
   }
 }
