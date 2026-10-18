@@ -541,10 +541,22 @@ async function repairReports(root, registerRowCount) {
   await patchRange(root, "Daily Report", "A5:A5", {
     formulas: [['=COUNTIF(DARegisterTable[Record Key],"<>")']]
   });
+  await patchRange(root, "Daily Report", "C5:C5", {
+    formulas: [['=COUNTIFS(DARegisterTable[Record Key],"<>",DARegisterTable[Priority],"High")']]
+  });
+  await patchRange(root, "Daily Report", "E5:E5", {
+    formulas: [['=COUNTIF(DARegisterTable[Document review],"*Queued*")']]
+  });
+  await patchRange(root, "Daily Report", "G5:G5", {
+    formulas: [['=COUNTIFS(DARegisterTable[Record Key],"<>",DARegisterTable[Builder],"<>",DARegisterTable[Builder],"<>Not publicly identified*")']]
+  });
 
   await patchRange(root, "Daily Report", "J4:J7", { values: [["Under assessment"], ["Lodged"], ["On notification"], [""]] });
   await patchRange(root, "Daily Report", "K4:K7", {
     formulas: [["=COUNTIFS(DARegisterTable[Stage],J4)"], ["=COUNTIFS(DARegisterTable[Stage],J5)"], ["=COUNTIFS(DARegisterTable[Stage],J6)"], [""]]
+  });
+  await patchRange(root, "Daily Report", "K18:K25", {
+    formulas: Array.from({ length: 8 }, (_, index) => [`=COUNTIFS(DARegisterTable[Building type],J${18 + index})`])
   });
 
   await patchRange(root, "Daily Report", "A19:A27", { values: [
@@ -609,7 +621,7 @@ async function verifyReportHealth(root) {
   const checks = [
     ["Summary", "A5:D10"],
     ["Summary", "A20:I40"],
-    ["Daily Report", "A4:K27"]
+    ["Daily Report", "A5:K27"]
   ];
   const errors = [];
   for (const [sheetName, address] of checks) {
@@ -621,10 +633,7 @@ async function verifyReportHealth(root) {
         const value = row[columnIndex];
         if (typeof value === "string" && /^#(?:REF|VALUE|NAME|DIV\/0|N\/A|NUM|NULL)!?$/i.test(value.trim())) {
           const cell = `${columnName(columnNumber(firstColumn) + columnIndex)}${firstRow + rowIndex}`;
-          const formula = range.formulas?.[rowIndex]?.[columnIndex] ?? "";
-          const above = rowIndex > 0 ? range.values?.[rowIndex - 1]?.[columnIndex] ?? "" : "";
-          const left = columnIndex > 0 ? range.values?.[rowIndex]?.[columnIndex - 1] ?? "" : "";
-          errors.push(`${sheetName}!${cell}: ${value} [above=${JSON.stringify(above)}, left=${JSON.stringify(left)}, formula=${JSON.stringify(formula)}]`);
+          errors.push(`${sheetName}!${cell}: ${value}`);
         }
       }
     }
