@@ -1,0 +1,34 @@
+name: Authorize ACT DA report email
+
+on:
+  workflow_dispatch:
+    inputs:
+      public_key:
+        description: "Base64-encoded one-time encryption public key"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Authorize Microsoft email access
+        run: node src/authorize-email.mjs
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          AUTH_PUBLIC_KEY_B64: ${{ inputs.public_key }}
+      - name: Upload the encrypted refresh token
+        uses: actions/upload-artifact@v4
+        with:
+          name: email-authorization-token
+          path: /tmp/email-authorization-token.json
+          retention-days: 1
