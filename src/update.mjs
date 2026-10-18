@@ -609,7 +609,7 @@ async function verifyReportHealth(root) {
   const checks = [
     ["Summary", "A5:D10"],
     ["Summary", "A20:I40"],
-    ["Daily Report", "A5:K27"]
+    ["Daily Report", "A4:K27"]
   ];
   const errors = [];
   for (const [sheetName, address] of checks) {
@@ -621,12 +621,15 @@ async function verifyReportHealth(root) {
         const value = row[columnIndex];
         if (typeof value === "string" && /^#(?:REF|VALUE|NAME|DIV\/0|N\/A|NUM|NULL)!?$/i.test(value.trim())) {
           const cell = `${columnName(columnNumber(firstColumn) + columnIndex)}${firstRow + rowIndex}`;
-          errors.push(`${sheetName}!${cell}: ${value}`);
+          const formula = range.formulas?.[rowIndex]?.[columnIndex] ?? "";
+          const above = rowIndex > 0 ? range.values?.[rowIndex - 1]?.[columnIndex] ?? "" : "";
+          const left = columnIndex > 0 ? range.values?.[rowIndex]?.[columnIndex - 1] ?? "" : "";
+          errors.push(`${sheetName}!${cell}: ${value} [above=${JSON.stringify(above)}, left=${JSON.stringify(left)}, formula=${JSON.stringify(formula)}]`);
         }
       }
     }
   }
-  if (errors.length) throw new Error(`Report verification found formula errors: ${errors.slice(0, 10).join("; ")}`);
+  if (errors.length) throw new Error(`Report verification found formula errors: ${errors.join("; ")}`);
 }
 
 async function resizeTableRows(tableBase, tableRange, targetRows, columnCount) {
