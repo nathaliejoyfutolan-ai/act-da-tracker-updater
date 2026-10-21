@@ -169,10 +169,10 @@ function sortableDate(value) {
 function buildReportHtml({ reportDate, cards, opportunities, questions, workbookUrl, refreshStatus, documentLinks }) {
   const cardColumns = [0, 2, 4, 6];
   const cardPalettes = [
-    ["#e8f5ee", "#155c42", "#c9e7d6"],
-    ["#fff4d8", "#8a5b00", "#f3daa0"],
-    ["#eaf1fb", "#245b91", "#cbdcf1"],
-    ["#f4ecfa", "#6a3b82", "#dfcdec"]
+    ["#eaf2fa", "#214b76", "#cbdced"],
+    ["#f4ecff", "#7137a8", "#ddc7f2"],
+    ["#fff0f5", "#bd2f72", "#f3c7d9"],
+    ["#fff0ee", "#cf3d57", "#f3c8cc"]
   ];
   const cardHtml = cardColumns.map((column, index) => `
     <td style="padding:16px 12px;border:6px solid #ffffff;background:${cardPalettes[index][0]};text-align:center;border-radius:12px;">
@@ -184,30 +184,30 @@ function buildReportHtml({ reportDate, cards, opportunities, questions, workbook
   const headers = [...(opportunities[0] ?? []), "Document insights"];
   const opportunityRows = opportunities.slice(1).filter((row) => row.some(nonBlank));
   const opportunityTable = opportunityRows.length
-    ? `<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:0;font-size:11px;line-height:15px;border:1px solid #d8e2dd;border-radius:10px;overflow:hidden;">
-        <thead><tr>${headers.map((header) => `<th style="padding:10px 8px;border-right:1px solid #4f816d;background:#27644d;color:#fff;text-align:left;vertical-align:bottom;font-size:10px;line-height:13px;letter-spacing:.3px;text-transform:uppercase;">${escapeHtml(header)}</th>`).join("")}</tr></thead>
+    ? `<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:0;font-size:11px;line-height:15px;border:1px solid #d9dfeb;border-radius:10px;overflow:hidden;">
+        <thead><tr>${headers.map((header) => `<th style="padding:10px 8px;border-right:1px solid #567391;background:#234b75;color:#fff;text-align:left;vertical-align:bottom;font-size:10px;line-height:13px;letter-spacing:.3px;text-transform:uppercase;">${escapeHtml(header)}</th>`).join("")}</tr></thead>
         <tbody>${opportunityRows.map((row, rowIndex) => {
           const daNumber = String(row[0] ?? "").trim();
           const documents = documentLinks.get(daNumber);
-          const background = rowIndex % 2 === 0 ? "#ffffff" : "#f7faf8";
+          const background = rowIndex % 2 === 0 ? "#ffffff" : "#f8f7fc";
           const cells = row.map((value, index) => {
           const displayValue = index === 8 && documents
             ? `View ${Number(documents.count) || 0} documents`
             : formatCell(value, index);
           const display = escapeHtml(displayValue);
           if (index === 0 && nonBlank(value)) {
-            return `<td style="padding:9px 8px;border-right:1px solid #e0e8e4;border-bottom:1px solid #e0e8e4;background:${background};vertical-align:top;"><a href="${escapeAttribute(applicationUrl(value))}" style="color:#176b50;font-weight:800;text-decoration:none;border-bottom:1px solid #86b7a4;">${display}</a></td>`;
+            return `<td style="padding:9px 8px;border-right:1px solid #e4e3eb;border-bottom:1px solid #e4e3eb;background:${background};vertical-align:top;"><a href="${escapeAttribute(applicationUrl(value))}" style="color:#7a35b2;font-weight:800;text-decoration:none;border-bottom:1px solid #c9a9df;">${display}</a></td>`;
           }
           if (index === 1) {
-            return `<td style="padding:9px 8px;border-right:1px solid #e0e8e4;border-bottom:1px solid #e0e8e4;background:${background};vertical-align:top;">${stageBadge(displayValue)}</td>`;
+            return `<td style="padding:9px 8px;border-right:1px solid #e4e3eb;border-bottom:1px solid #e4e3eb;background:${background};vertical-align:top;">${stageBadge(displayValue)}</td>`;
           }
           if (index === 8 && documents) {
             const destination = workbookLocationUrl(workbookUrl, documents.target) || workbookUrl;
-            return `<td style="padding:9px 8px;border-right:1px solid #e0e8e4;border-bottom:1px solid #e0e8e4;background:${background};vertical-align:top;"><a href="${escapeAttribute(destination)}" style="display:inline-block;padding:6px 9px;border-radius:14px;background:#e7f3ed;color:#155c42;font-weight:800;text-decoration:none;white-space:nowrap;">${display} →</a></td>`;
+            return `<td style="padding:9px 8px;border-right:1px solid #e4e3eb;border-bottom:1px solid #e4e3eb;background:${background};vertical-align:top;"><a href="${escapeAttribute(destination)}" style="display:inline-block;padding:6px 9px;border-radius:14px;background:#f2e8fb;color:#7137a8;font-weight:800;text-decoration:none;white-space:nowrap;">${display} →</a></td>`;
           }
-          return `<td style="padding:9px 8px;border-right:1px solid #e0e8e4;border-bottom:1px solid #e0e8e4;background:${background};vertical-align:top;color:#2c3c35;">${display}</td>`;
+          return `<td style="padding:9px 8px;border-right:1px solid #e4e3eb;border-bottom:1px solid #e4e3eb;background:${background};vertical-align:top;color:#303746;">${display}</td>`;
         });
-          cells.push(`<td style="padding:9px 8px;border-bottom:1px solid #e0e8e4;background:${background};vertical-align:top;">${insightBadges(documents)}</td>`);
+          cells.push(`<td style="padding:9px 8px;border-bottom:1px solid #e4e3eb;background:${background};vertical-align:top;">${insightBadges(documents)}</td>`);
           return `<tr>${cells.join("")}</tr>`;
         }).join("")}</tbody>
       </table>`
@@ -216,37 +216,37 @@ function buildReportHtml({ reportDate, cards, opportunities, questions, workbook
   const questionRows = questions.slice(1).filter((row) => nonBlank(row[0]));
   const questionHtml = questionRows.map((row, index) => `
     <tr>
-      <td style="width:34%;padding:12px 14px;border-bottom:1px solid #e0e8e4;background:${index % 2 === 0 ? "#f7faf8" : "#ffffff"};font-weight:700;color:#174f3b;vertical-align:top;">${escapeHtml(row[0])}</td>
-      <td style="padding:12px 14px;border-bottom:1px solid #e0e8e4;background:${index % 2 === 0 ? "#f7faf8" : "#ffffff"};color:#3f5048;vertical-align:top;">${escapeHtml(row[3] ?? "")}</td>
+      <td style="width:34%;padding:12px 14px;border-bottom:1px solid #e4e3eb;background:${index % 2 === 0 ? "#f8f7fc" : "#ffffff"};font-weight:700;color:#234b75;vertical-align:top;">${escapeHtml(row[0])}</td>
+      <td style="padding:12px 14px;border-bottom:1px solid #e4e3eb;background:${index % 2 === 0 ? "#f8f7fc" : "#ffffff"};color:#444a59;vertical-align:top;">${escapeHtml(row[3] ?? "")}</td>
     </tr>`).join("");
   const refreshNotice = refreshStatus === "fresh" ? "" : `
-    <p style="margin:0 0 18px;padding:12px 14px;background:#fff4d8;color:#7a5200;border:1px solid #edcf83;border-radius:8px;">
+    <p style="margin:0 0 18px;padding:12px 14px;background:#fff0f5;color:#9e285f;border:1px solid #edbfd2;border-radius:8px;">
       The latest refresh was temporarily unavailable. This report uses the most recent saved workbook data.
     </p>`;
 
   return `<!doctype html>
-  <html><body style="margin:0;background:#eef3f0;font-family:Arial,Helvetica,sans-serif;color:#1f2d28;">
+  <html><body style="margin:0;background:#f2f2f7;font-family:Arial,Helvetica,sans-serif;color:#242a37;">
     <div style="max-width:1180px;margin:0 auto;padding:28px 14px;">
-      <div style="background:#123d32;background-image:linear-gradient(135deg,#123d32 0%,#22664e 72%,#b58b2a 150%);color:#fff;padding:30px 30px 27px;border-radius:14px 14px 0 0;">
-        <div style="font-size:11px;line-height:16px;letter-spacing:2px;text-transform:uppercase;color:#dfc786;font-weight:800;">Decarby Market Intelligence</div>
+      <div style="background:#234b75;background-image:linear-gradient(125deg,#234b75 0%,#7137a8 58%,#d53083 82%,#ef4660 100%);color:#fff;padding:30px 30px 27px;border-radius:14px 14px 0 0;">
+        <div style="font-size:11px;line-height:16px;letter-spacing:2px;text-transform:uppercase;color:#ffd7e4;font-weight:800;">Decarby Market Intelligence</div>
         <h1 style="margin:7px 0 0;font-size:28px;line-height:34px;font-weight:800;">ACT DA Opportunity Tracker</h1>
         <div style="margin-top:7px;color:#dcebe4;font-size:14px;">Daily opportunity brief · ${escapeHtml(reportDate)}</div>
       </div>
-      <div style="background:#fff;padding:24px 26px 30px;border-radius:0 0 14px 14px;box-shadow:0 10px 28px rgba(18,61,50,.10);">
+      <div style="background:#fff;padding:24px 26px 30px;border-radius:0 0 14px 14px;box-shadow:0 10px 28px rgba(35,75,117,.12);">
         ${refreshNotice}
         <table role="presentation" style="width:100%;border-collapse:collapse;table-layout:fixed;margin:0 0 26px;"><tr>${cardHtml}</tr></table>
-        <div style="margin:6px 0 14px;border-left:4px solid #c49a38;padding-left:12px;">
-          <h2 style="margin:0;color:#174f3b;font-size:20px;line-height:26px;">Top 20 highest-priority opportunities</h2>
-          <div style="margin-top:3px;color:#6c7c74;font-size:12px;">Ranked for Decarby relevance, live stage and available document evidence.</div>
+        <div style="margin:6px 0 14px;border-left:4px solid #e43f74;padding-left:12px;">
+          <h2 style="margin:0;color:#234b75;font-size:20px;line-height:26px;">Top 20 highest-priority opportunities</h2>
+          <div style="margin-top:3px;color:#6d7180;font-size:12px;">Ranked for Decarby relevance, live stage and available document evidence.</div>
         </div>
         ${opportunityTable}
-        <div style="margin:30px 0 14px;border-left:4px solid #c49a38;padding-left:12px;">
-          <h2 style="margin:0;color:#174f3b;font-size:20px;line-height:26px;">Bilal's market questions</h2>
-          <div style="margin-top:3px;color:#6c7c74;font-size:12px;">A concise readout from the latest public application data.</div>
+        <div style="margin:30px 0 14px;border-left:4px solid #e43f74;padding-left:12px;">
+          <h2 style="margin:0;color:#234b75;font-size:20px;line-height:26px;">Bilal's market questions</h2>
+          <div style="margin-top:3px;color:#6d7180;font-size:12px;">A concise readout from the latest public application data.</div>
         </div>
-        <table role="presentation" style="width:100%;border-collapse:separate;border-spacing:0;font-size:13px;border:1px solid #d8e2dd;border-radius:10px;overflow:hidden;">${questionHtml}</table>
-        <p style="margin:28px 0 14px;text-align:center;"><a href="${escapeAttribute(workbookUrl)}" style="display:inline-block;background:#174f3b;color:#fff;text-decoration:none;padding:13px 22px;border-radius:24px;font-weight:800;box-shadow:0 5px 14px rgba(23,79,59,.20);">Open the live workbook&nbsp;&nbsp;→</a></p>
-        <p style="margin:0;text-align:center;font-size:10px;line-height:15px;color:#7a8881;">Generated automatically after the ACT DA tracker refresh. Publicly unavailable builder, budget, solar, battery and inverter information is never inferred.</p>
+        <table role="presentation" style="width:100%;border-collapse:separate;border-spacing:0;font-size:13px;border:1px solid #d9dfeb;border-radius:10px;overflow:hidden;">${questionHtml}</table>
+        <p style="margin:28px 0 14px;text-align:center;"><a href="${escapeAttribute(workbookUrl)}" style="display:inline-block;background:#7137a8;background-image:linear-gradient(90deg,#7137a8,#d53083,#ef4660);color:#fff;text-decoration:none;padding:13px 22px;border-radius:24px;font-weight:800;box-shadow:0 5px 14px rgba(113,55,168,.24);">Open the live workbook&nbsp;&nbsp;→</a></p>
+        <p style="margin:0;text-align:center;font-size:10px;line-height:15px;color:#7b7f8b;">Generated automatically after the ACT DA tracker refresh. Publicly unavailable builder, budget, solar, battery and inverter information is never inferred.</p>
       </div>
     </div>
   </body></html>`;
@@ -255,10 +255,10 @@ function buildReportHtml({ reportDate, cards, opportunities, questions, workbook
 function stageBadge(value) {
   const stage = String(value ?? "");
   const palette = /^On notification$/i.test(stage)
-    ? ["#fff0c7", "#7a5000"]
+    ? ["#fff0f5", "#bd2f72"]
     : /^Under assessment$/i.test(stage)
-      ? ["#e7eefb", "#275b91"]
-      : ["#e7f3ed", "#155c42"];
+      ? ["#eee8fa", "#7137a8"]
+      : ["#eaf2fa", "#214b76"];
   return `<span style="display:inline-block;padding:5px 8px;border-radius:13px;background:${palette[0]};color:${palette[1]};font-weight:800;white-space:nowrap;">${escapeHtml(stage || "—")}</span>`;
 }
 
@@ -266,10 +266,10 @@ function insightBadges(documents) {
   const insight = documentInsight(documents);
   if (/^No /i.test(insight)) return `<span style="color:#809087;">${escapeHtml(insight)}</span>`;
   const palettes = {
-    "Cost plan available": ["#f4ecfa", "#6a3b82"],
-    "Solar mentioned": ["#fff0c7", "#7a5000"],
-    "Battery mentioned": ["#e7eefb", "#275b91"],
-    "Inverter mentioned": ["#e7f3ed", "#155c42"]
+    "Cost plan available": ["#f4ecff", "#7137a8"],
+    "Solar mentioned": ["#fff0ee", "#cf3d57"],
+    "Battery mentioned": ["#eaf2fa", "#214b76"],
+    "Inverter mentioned": ["#fff0f5", "#bd2f72"]
   };
   return insight.split("; ").map((item) => {
     const palette = palettes[item] ?? ["#eef2f0", "#4d5d55"];
