@@ -105,7 +105,24 @@ async function range(address) {
 }
 
 async function loadOpportunityData() {
-  const tableRange = await graph(`${workbookRoot}/tables/${encodeURIComponent("DARegisterTable")}/range`);
+  const documentTableBase = `${workbookRoot}/tables/${encodeURIComponent("DADocumentsTable")}`;
+  const [tableRange, documentColumns] = await Promise.all([
+    graph(`${workbookRoot}/tables/${encodeURIComponent("DARegisterTable")}/range`),
+    graph(`${documentTableBase}/columns`)
+  ]);
+  const documentDaColumn = documentColumns.value?.find((column) => column.name === "DA number");
+  const documentNameColumn = documentColumns.value?.find((column) => column.name === "Document name");
+  if (!documentDaColumn || !documentNameColumn) throw new Error("DADocumentsTable is missing DA number or Document name");
+  const [documentDaRange, documentNameRange] = await Promise.all([
+    graph(`${documentTableBase}/columns/${encodeURIComponent(documentDaColumn.id)}/dataBodyRange`),
+    graph(`${documentTableBase}/columns/${encodeURIComponent(documentNameColumn.id)}/dataBodyRange`)
+  ]);
+  const documentRowByKey = new Map();
+  for (let rowIndex = 0; rowIndex < (documentDaRange.values ?? []).length; rowIndex += 1) {
+    const daNumber = String(documentDaRange.values?.[rowIndex]?.[0] ?? "").trim();
+    const documentName = String(documentNameRange.values?.[rowIndex]?.[0] ?? "").trim();
+    if (daNumber && documentName) documentRowByKey.set(`${daNumber}|${documentName}`, rowIndex + 2);
+  }
   const headers = tableRange.values?.[0] ?? [];
   const values = tableRange.values?.slice(1) ?? [];
   const formulas = tableRange.formulas?.slice(1) ?? [];
@@ -141,10 +158,14 @@ async function loadOpportunityData() {
     const row = values[rowIndex] ?? [];
     const daNumber = String(values[rowIndex]?.[daIndex] ?? "").trim();
     if (!daNumber) continue;
+    const costPlanUrl = hyperlinkUrl(formulas[rowIndex]?.[costPlanIndex]);
+    const costPlanName = fileNameFromUrl(costPlanUrl);
+    const costPlanRow = documentRowByKey.get(`${daNumber}|${costPlanName}`);
     const documents = {
       count: row[countIndex] ?? 0,
       target: hyperlinkUrl(formulas[rowIndex]?.[allDocumentsIndex]),
-      costPlan: Boolean(hyperlinkUrl(formulas[rowIndex]?.[costPlanIndex]) || row[costPlanIndex]),
+      costPlan: Boolean(costPlanUrl || row[costPlanIndex]),
+      costPlanTarget: costPlanRow ? `#'DA Documents'!A${costPlanRow}` : "",
       solar: String(row[solarIndex] ?? ""),
       battery: String(row[batteryIndex] ?? ""),
       evidence: String(row[evidenceIndex] ?? "")
@@ -292,7 +313,7 @@ function buildReportHtml({ reportDate, cards, opportunities, questions, workbook
           }
           return `<td style="padding:9px 8px;border-right:1px solid #e4e3eb;border-bottom:1px solid #e4e3eb;background:${background};vertical-align:top;color:#303746;">${display}</td>`;
         });
-          cells.push(`<td style="padding:9px 8px;border-bottom:1px solid #e4e3eb;background:${background};vertical-align:top;">${insightBadges(documents)}</td>`);
+          cells.push(`<td style="padding:9px 8px;border-bottom:1px solid #e4e3eb;background:${background};vertical-align:top;">${insightBadges(documents, workbookUrl)}</td>`);
           return `<tr>${cells.join("")}</tr>`;
         }).join("")}</tbody>
       </table>`
@@ -347,7 +368,7 @@ function stageBadge(value) {
   return `<span style="display:inline-block;padding:5px 8px;border-radius:13px;background:${palette[0]};color:${palette[1]};font-weight:800;white-space:nowrap;">${escapeHtml(stage || "—")}</span>`;
 }
 
-function insightBadges(documents) {
+function insightBadges(documents, workbookUrl) {
   const insight = documentInsight(documents);
   if (/^No /i.test(insight)) return `<span style="color:#809087;">${escapeHtml(insight)}</span>`;
   const palettes = {
@@ -358,7 +379,12 @@ function insightBadges(documents) {
   };
   return insight.split("; ").map((item) => {
     const palette = palettes[item] ?? ["#eef2f0", "#4d5d55"];
-    return `<span style="display:inline-block;margin:0 4px 4px 0;padding:4px 7px;border-radius:12px;background:${palette[0]};color:${palette[1]};font-weight:700;white-space:nowrap;">${escapeHtml(item)}</span>`;
+    const style = `display:inline-block;margin:0 4px 4px 0;padding:4px 7px;border-radius:12px;background:${palette[0]};color:${palette[1]};font-weight:700;white-space:nowrap;`;
+    if (item === "Cost plan available") {
+      const destination = workbookLocationUrl(workbookUrl, documents.costPlanTarget || documents.target) || workbookUrl;
+      return `<a href="${escapeAttribute(destination)}" style="${style}text-decoration:none;">${escapeHtml(item)}&nbsp;→</a>`;
+    }
+    return `<span style="${style}">${escapeHtml(item)}</span>`;
   }).join("");
 }
 
@@ -373,6 +399,15 @@ function formatCell(value, columnIndex) {
 function hyperlinkUrl(formula) {
   const match = String(formula ?? "").match(/^=HYPERLINK\("((?:[^"]|"")*)"/i);
   return match ? match[1].replaceAll('""', '"') : "";
+}
+
+function fileNameFromUrl(value) {
+  if (!value) return "";
+  try {
+    return decodeURIComponent(new URL(value).pathname.split("/").at(-1) ?? "");
+  } catch {
+    return "";
+  }
 }
 
 function workbookLocationUrl(workbookUrl, internalTarget) {
