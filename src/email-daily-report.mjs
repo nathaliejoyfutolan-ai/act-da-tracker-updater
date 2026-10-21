@@ -3,6 +3,34 @@ const WORKBOOK_PATH = "/ACT_DA_Opportunity_Tracker_Interactive.xlsx";
 const REPORT_SHEET = "Daily Report";
 const REPORT_TIME_ZONE = "Asia/Manila";
 const refreshStatus = process.env.REPORT_REFRESH_STATUS ?? "fresh";
+const ACT_POSTCODES = postcodeMap({
+  "2600": "BARTON|CANBERRA|CAPITAL HILL|DEAKIN|HARMAN|HMAS HARMAN|PARKES|RUSSELL|YARRALUMLA",
+  "2601": "ACTON|CANBERRA|CITY",
+  "2602": "AINSLIE|DICKSON|DOWNER|HACKETT|LYNEHAM|WATSON",
+  "2603": "FORREST|GRIFFITH|MANUKA|RED HILL",
+  "2604": "CAUSEWAY|KINGSTON|NARRABUNDAH",
+  "2605": "CURTIN|GARRAN|HUGHES",
+  "2606": "CHIFLEY|LYONS|PHILLIP|WODEN",
+  "2607": "FARRER|ISAACS|MAWSON|PEARCE|TORRENS",
+  "2609": "CANBERRA AIRPORT|FYSHWICK|MAJURA|PIALLIGO|SYMONSTON",
+  "2611": "CHAPMAN|COOMBS|COREE|DENMAN PROSPECT|DUFFY|FISHER|HOLDER|MOLONGLO|RIVETT|STIRLING|STROMLO|URIARRA VILLAGE|WARAMANGA|WESTON|WESTON CREEK|WHITLAM|WRIGHT",
+  "2612": "BRADDON|CAMPBELL|REID|TURNER",
+  "2614": "ARANDA|COOK|HAWKER|JAMISON CENTRE|MACQUARIE|PAGE|SCULLIN|WEETANGERA",
+  "2615": "CHARNWOOD|DUNLOP|FLOREY|FLYNN|FRASER|HIGGINS|HOLT|KIPPAX|LATHAM|MACGREGOR|MACNAMARA|MELBA|SPENCE|STRATHNAIRN",
+  "2617": "BELCONNEN|BRUCE|EVATT|GIRALANG|KALEEN|LAWSON|MCKELLAR|UNIVERSITY OF CANBERRA",
+  "2618": "HALL",
+  "2620": "BEARD|BOOTH|HUME|KOWEN|OAKS ESTATE|PADDYS RIVER|TENNENT|THARWA|WILLIAMSDALE",
+  "2900": "GREENWAY",
+  "2902": "KAMBAH|KAMBAH VILLAGE",
+  "2903": "ERINDALE CENTRE|OXLEY|WANNIASSA",
+  "2904": "FADDEN|GOWRIE|MACARTHUR|MONASH",
+  "2905": "BONYTHON|CALWELL|CHISHOLM|GILMORE|ISABELLA PLAINS|RICHARDSON|THEODORE",
+  "2906": "BANKS|CONDER|GORDON",
+  "2911": "CRACE|KENNY|MITCHELL",
+  "2912": "GUNGAHLIN",
+  "2913": "CASEY|FRANKLIN|NGUNNAWAL|NICHOLLS|PALMERSTON|TAYLOR",
+  "2914": "AMAROO|BONNER|FORDE|HARRISON|JACKA|MONCRIEFF|THROSBY"
+});
 
 const required = ["MS_TENANT_ID", "MS_CLIENT_ID", "MS_REFRESH_TOKEN", "REPORT_RECIPIENT"];
 for (const key of required) {
@@ -92,6 +120,7 @@ async function loadOpportunityData() {
   const stageIndex = headers.indexOf("Stage");
   const lodgedIndex = headers.indexOf("Lodged");
   const addressIndex = headers.indexOf("Address");
+  const suburbIndex = headers.indexOf("Suburb");
   const proposalIndex = headers.indexOf("Proposal");
   const buildingTypeIndex = headers.indexOf("Building type");
   const developerIndex = headers.indexOf("Organisation / developer lead");
@@ -99,7 +128,7 @@ async function loadOpportunityData() {
   const budgetIndex = headers.indexOf("Project budget (AUD)");
   const requiredIndexes = [
     daIndex, countIndex, allDocumentsIndex, costPlanIndex, solarIndex, batteryIndex, evidenceIndex,
-    priorityIndex, stageIndex, lodgedIndex, addressIndex, proposalIndex, buildingTypeIndex,
+    priorityIndex, stageIndex, lodgedIndex, addressIndex, suburbIndex, proposalIndex, buildingTypeIndex,
     developerIndex, builderIndex, budgetIndex
   ];
   if (requiredIndexes.some((index) => index < 0)) {
@@ -129,8 +158,8 @@ async function loadOpportunityData() {
       row: [
         daNumber,
         stage,
-        row[addressIndex] ?? "",
-        row[proposalIndex] ?? "",
+        projectAddress(row[addressIndex], row[suburbIndex]),
+        proposalHighlight(row[proposalIndex]),
         row[buildingTypeIndex] ?? "",
         row[developerIndex] ?? "",
         row[builderIndex] ?? "",
@@ -143,7 +172,7 @@ async function loadOpportunityData() {
   return {
     documentLinks,
     opportunities: [
-      ["DA Number", "Stage", "Project / Address", "Proposal", "Building type", "Developer / Owner", "Builder", "Project Budget", "Documents"],
+      ["DA Number", "Stage", "Project / Address", "Decarby-relevant highlights", "Building type", "Developer / Owner", "Builder", "Project Budget", "Documents"],
       ...candidates.slice(0, 20).map((candidate) => candidate.row)
     ]
   };
@@ -164,6 +193,56 @@ function sortableDate(value) {
   if (typeof value === "number") return value;
   const parsed = Date.parse(String(value ?? ""));
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function postcodeMap(groups) {
+  return new Map(Object.entries(groups).flatMap(([postcode, suburbs]) =>
+    suburbs.split("|").map((suburb) => [suburb, postcode])
+  ));
+}
+
+function projectAddress(address, suburb) {
+  const street = String(address ?? "").trim();
+  const locality = String(suburb ?? "").trim().toUpperCase();
+  const postcode = ACT_POSTCODES.get(locality);
+  const parts = [street];
+  if (locality && !street.toUpperCase().includes(locality)) parts.push(locality);
+  parts.push(postcode ? `ACT ${postcode}` : "ACT");
+  return parts.filter(Boolean).join(", ");
+}
+
+function proposalHighlight(value) {
+  const source = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/^PUBLIC NOTIFICATION(?: EXTENDED)?(?: UNTIL [^-]+)?\s*-\s*/i, "")
+    .replace(/PLANNING ACT 2023\s*-\s*/gi, "")
+    .replace(/^(?:AMENDMENT TO (?:DA )?\d+(?:-\w+)?\s*-\s*)?PROPOSAL FOR\s*/i, "")
+    .trim();
+  if (!source) return "—";
+
+  const segments = source.split(/(?<=[.;])\s+|\s+-\s+/)
+    .map((segment) => segment.replace(/^[.;,:\-\s]+|[.;,:\-\s]+$/g, "").trim())
+    .filter(Boolean);
+  const ranked = segments.map((text, index) => {
+    const energy = (text.match(/\b(?:solar|photovoltaic|pv|battery|bess|inverter|electrical|substation|switchboard|ev charg\w*)\b/gi) ?? []).length;
+    const asset = (text.match(/\b(?:warehouse|industrial|commercial|apartment|multi-unit|office|retail|hospital|school|education|childcare|building|storey|roof|carport|mechanical|services)\b/gi) ?? []).length;
+    const work = (text.match(/\b(?:construction|development|alteration|addition|extension|fitout|demolition|refurbishment|new)\b/gi) ?? []).length;
+    return { text, index, score: energy * 10 + asset * 4 + work * 2 };
+  });
+  const selected = ranked
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 2)
+    .sort((a, b) => a.index - b.index)
+    .map((item) => truncateAtWord(item.text, 125));
+  return truncateAtWord((selected.length ? selected : [segments[0] ?? source]).join("; "), 230);
+}
+
+function truncateAtWord(value, limit) {
+  const text = String(value ?? "").trim();
+  if (text.length <= limit) return text;
+  const shortened = text.slice(0, limit - 1).replace(/\s+\S*$/, "").replace(/[,:;\-\s]+$/, "");
+  return `${shortened || text.slice(0, limit - 1)}…`;
 }
 
 function buildReportHtml({ reportDate, cards, opportunities, questions, workbookUrl, refreshStatus, documentLinks }) {
