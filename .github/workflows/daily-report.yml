@@ -2,12 +2,13 @@ name: Email ACT DA daily report
 
 on:
   schedule:
-    # 21:30 UTC is 05:30 the following day in the Philippines (UTC+8).
-    - cron: "30 21 * * *"
+    # Multiple off-peak triggers improve reliability when GitHub delays scheduled jobs.
+    # The sender deduplicates by Philippine report date.
+    - cron: "29,39,49,59 21 * * *"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: act-da-daily-report
@@ -25,16 +26,54 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Check whether today's report was already sent
+        id: report_gate
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          report_date=$(TZ=Asia/Manila date +%F)
+          last_date=$(cat .github/last-daily-report-date 2>/dev/null || true)
+          should_send=true
+          if [[ "$EVENT_NAME" == "schedule" && "$last_date" == "$report_date" ]]; then
+            should_send=false
+          fi
+          echo "report_date=$report_date" >> "$GITHUB_OUTPUT"
+          echo "should_send=$should_send" >> "$GITHUB_OUTPUT"
       - name: Refresh the ACT DA tracker
+        id: refresh
+        if: steps.report_gate.outputs.should_send == 'true'
+        continue-on-error: true
+        run: npm run update
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
+      - name: Retry the refresh once
+        id: refresh_retry
+        if: steps.report_gate.outputs.should_send == 'true' && steps.refresh.outcome == 'failure'
+        continue-on-error: true
         run: npm run update
         env:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
       - name: Email the Daily Report
+        if: always() && steps.report_gate.outputs.should_send == 'true'
         run: npm run email-daily-report
         env:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
           REPORT_RECIPIENT: nathalie@decarbysolar.com.au
+          REPORT_REFRESH_STATUS: ${{ (steps.refresh.outcome == 'success' || steps.refresh_retry.outcome == 'success') && 'fresh' || 'stale' }}
+      - name: Record successful scheduled delivery
+        if: success() && github.event_name == 'schedule' && steps.report_gate.outputs.should_send == 'true'
+        run: |
+          git pull --rebase origin main
+          printf '%s\n' "${{ steps.report_gate.outputs.report_date }}" > .github/last-daily-report-date
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last-daily-report-date
+          git commit -m "Record ACT DA daily report delivery" || exit 0
+          git push

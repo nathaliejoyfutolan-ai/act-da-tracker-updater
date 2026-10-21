@@ -2,6 +2,7 @@ const GRAPH = "https://graph.microsoft.com/v1.0";
 const WORKBOOK_PATH = "/ACT_DA_Opportunity_Tracker_Interactive.xlsx";
 const REPORT_SHEET = "Daily Report";
 const REPORT_TIME_ZONE = "Asia/Manila";
+const refreshStatus = process.env.REPORT_REFRESH_STATUS ?? "fresh";
 
 const required = ["MS_TENANT_ID", "MS_CLIENT_ID", "MS_REFRESH_TOKEN", "REPORT_RECIPIENT"];
 for (const key of required) {
@@ -47,7 +48,8 @@ try {
     cards: cards.values ?? [],
     opportunities: opportunities.values ?? [],
     questions: questions.values ?? [],
-    workbookUrl: workbookItem.webUrl
+    workbookUrl: workbookItem.webUrl,
+    refreshStatus
   });
 
   await graph("/me/sendMail", {
@@ -73,7 +75,7 @@ async function range(address) {
   return graph(`${workbookRoot}/worksheets/${encodeURIComponent(REPORT_SHEET)}/range(address='${address}')`);
 }
 
-function buildReportHtml({ reportDate, cards, opportunities, questions, workbookUrl }) {
+function buildReportHtml({ reportDate, cards, opportunities, questions, workbookUrl, refreshStatus }) {
   const cardColumns = [0, 2, 4, 6];
   const cardHtml = cardColumns.map((column) => `
     <td style="padding:10px;border:1px solid #d8e3dc;background:#edf5ea;text-align:center;">
@@ -102,6 +104,10 @@ function buildReportHtml({ reportDate, cards, opportunities, questions, workbook
       <td style="padding:8px;border-bottom:1px solid #d6ddd9;font-weight:600;vertical-align:top;">${escapeHtml(row[0])}</td>
       <td style="padding:8px;border-bottom:1px solid #d6ddd9;vertical-align:top;">${escapeHtml(row[3] ?? "")}</td>
     </tr>`).join("");
+  const refreshNotice = refreshStatus === "fresh" ? "" : `
+    <p style="padding:10px;background:#fff2cc;color:#7f6000;border:1px solid #e6cf7a;">
+      The latest refresh was temporarily unavailable. This report uses the most recent saved workbook data.
+    </p>`;
 
   return `<!doctype html>
   <html><body style="margin:0;background:#f4f6f5;font-family:Arial,sans-serif;color:#1f2d28;">
@@ -111,6 +117,7 @@ function buildReportHtml({ reportDate, cards, opportunities, questions, workbook
         <div style="margin-top:5px;color:#d8e9df;">Daily report · ${escapeHtml(reportDate)}</div>
       </div>
       <div style="background:#fff;padding:22px;">
+        ${refreshNotice}
         <table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr>${cardHtml}</tr></table>
         <h2 style="margin-top:28px;color:#174f3b;">Highest-priority opportunities</h2>
         ${opportunityTable}
@@ -176,22 +183,33 @@ async function refreshAccessToken() {
 }
 
 async function graph(path, options = {}) {
-  const response = await fetch(`${GRAPH}${path}`, {
-    method: options.method ?? "GET",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      ...(options.useSession === false || !sessionId ? {} : { "workbook-session-id": sessionId })
-    },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
-  });
-  if (options.tolerate404 && response.status === 404) return null;
-  if (options.expectedStatus && response.status !== options.expectedStatus) {
-    throw new Error(`Graph request failed (${response.status}) for ${path}: ${await response.text()}`);
+  const requestBody = options.body === undefined ? undefined : JSON.stringify(options.body);
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const response = await fetch(`${GRAPH}${path}`, {
+      method: options.method ?? "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        ...(options.useSession === false || !sessionId ? {} : { "workbook-session-id": sessionId })
+      },
+      body: requestBody
+    });
+    if (options.tolerate404 && response.status === 404) return null;
+    const succeeded = options.expectedStatus ? response.status === options.expectedStatus : response.ok;
+    if (succeeded) return response.status === 204 || response.status === 202 ? null : response.json();
+
+    const details = await response.text();
+    const retryable = response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === 4) {
+      throw new Error(`Graph request failed (${response.status}) for ${path}: ${details}`);
+    }
+    const retryAfter = Number(response.headers.get("retry-after"));
+    const delayMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** (attempt - 1);
+    await delay(delayMs);
   }
-  if (!options.expectedStatus && !response.ok) {
-    throw new Error(`Graph request failed (${response.status}) for ${path}: ${await response.text()}`);
-  }
-  if (response.status === 204 || response.status === 202) return null;
-  return response.json();
+  throw new Error(`Graph request failed after retries: ${path}`);
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

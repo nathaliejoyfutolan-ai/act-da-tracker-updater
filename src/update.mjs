@@ -94,22 +94,22 @@ try {
   if (difference > 0) {
     const blanks = Array.from({ length: difference }, () => Array(COLUMN_COUNT).fill(""));
     await graph(`${tableBase}/rows/add`, { method: "POST", body: { index: null, values: blanks } });
-  } else if (difference < 0) {
-    for (let index = totalRows - 1; index >= rows.length; index -= 1) {
-      await graph(`${tableBase}/rows/${index}`, { method: "DELETE" });
-    }
   }
 
   tableRange = await graph(`${tableBase}/range`);
   const { firstColumn, headerRow } = parseRangeAddress(tableRange.address);
   const lastColumn = columnName(columnNumber(firstColumn) + COLUMN_COUNT - 1);
   const firstDataRow = headerRow + 1;
-  const lastDataRow = firstDataRow + rows.length - 1;
+  const writableRows = tableRange.rowCount - (tables.value[0].showHeaders === false ? 0 : 1) - (tables.value[0].showTotals ? 1 : 0);
+  const rowsToWrite = rows.concat(
+    Array.from({ length: writableRows - rows.length }, () => Array(COLUMN_COUNT).fill(""))
+  );
+  const lastDataRow = firstDataRow + rowsToWrite.length - 1;
   const address = `${firstColumn}${firstDataRow}:${lastColumn}${lastDataRow}`;
 
   await graph(`${root}/worksheets/${encodeURIComponent(SHEET_NAME)}/range(address='${address}')`, {
     method: "PATCH",
-    body: { values: rows }
+    body: { values: rowsToWrite }
   });
 
   const registerStats = await synchroniseRegister(root, arcResponse.features, documentsByDa, documentIndex);
@@ -819,18 +819,34 @@ async function refreshAccessToken() {
 }
 
 async function graph(path, options = {}) {
-  const response = await fetch(`${GRAPH}${path}`, {
-    method: options.method ?? "GET",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      ...(sessionId && options.useSession !== false ? { "Workbook-Session-Id": sessionId } : {})
-    },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
-  });
-  if (options.tolerate404 && response.status === 404) return {};
-  if (!response.ok) throw new Error(`Graph request failed (${response.status}) ${path}: ${await response.text()}`);
-  return response.status === 204 ? {} : response.json();
+  const requestBody = options.body === undefined ? undefined : JSON.stringify(options.body);
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const response = await fetch(`${GRAPH}${path}`, {
+      method: options.method ?? "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        ...(sessionId && options.useSession !== false ? { "Workbook-Session-Id": sessionId } : {})
+      },
+      body: requestBody
+    });
+    if (options.tolerate404 && response.status === 404) return {};
+    if (response.ok) return response.status === 204 ? {} : response.json();
+
+    const details = await response.text();
+    const retryable = response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === 4) {
+      throw new Error(`Graph request failed (${response.status}) ${path}: ${details}`);
+    }
+    const retryAfter = Number(response.headers.get("retry-after"));
+    const delayMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** (attempt - 1);
+    await delay(delayMs);
+  }
+  throw new Error(`Graph request failed after retries: ${path}`);
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function fetchJson(url) {
