@@ -105,11 +105,14 @@ async function range(address) {
 }
 
 async function loadOpportunityData() {
-  const documentTableBase = `${workbookRoot}/tables/${encodeURIComponent("DADocumentsTable")}`;
-  const [tableRange, documentColumns] = await Promise.all([
+  const [tableRange, documentTables] = await Promise.all([
     graph(`${workbookRoot}/tables/${encodeURIComponent("DARegisterTable")}/range`),
-    graph(`${documentTableBase}/columns`)
+    graph(`${workbookRoot}/worksheets/${encodeURIComponent("DA Documents")}/tables`)
   ]);
+  const documentTable = (documentTables.value ?? []).find((table) => table.name === "DADocumentsTable") ?? documentTables.value?.[0];
+  if (!documentTable) throw new Error("No table found on the DA Documents worksheet");
+  const documentTableBase = `${workbookRoot}/tables/${encodeURIComponent(documentTable.id)}`;
+  const documentColumns = await graph(`${documentTableBase}/columns`);
   const documentDaColumn = documentColumns.value?.find((column) => column.name === "DA number");
   const documentNameColumn = documentColumns.value?.find((column) => column.name === "Document name");
   if (!documentDaColumn || !documentNameColumn) throw new Error("DADocumentsTable is missing DA number or Document name");
