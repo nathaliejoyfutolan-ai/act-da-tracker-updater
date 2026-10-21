@@ -529,14 +529,14 @@ async function repairReports(root, registerRowCount) {
       `=IFERROR(${guarded("Organisation / developer lead", row)},"")`,
       `=IFERROR(${guarded("Builder", row)},"")`,
       `=IFERROR(${guarded("Project budget (AUD)", row)},"")`,
-      `=IFERROR(${guarded("Follow-up due", row)},"")`
+      `=IFERROR(HYPERLINK("#'DA Documents'!A"&MATCH(A${row},'DA Documents'!B:B,0),COUNTIF('DA Documents'!B:B,A${row})&" documents"),"")`
     ];
   });
   await patchRange(root, "Daily Report", "A11:I11", {
-    values: [["DA Number", "Stage", "Project / Address", "Proposal", "Building type", "Developer / Owner", "Builder", "Project Budget", "Follow-up Date"]]
+    values: [["DA Number", "Stage", "Project / Address", "Proposal", "Building type", "Developer / Owner", "Builder", "Project Budget", "Documents"]]
   });
   await patchRange(root, "Daily Report", "A12:I16", { formulas: dailyRows });
-  await patchRange(root, "Daily Report", "I12:I16", { numberFormat: Array.from({ length: 5 }, () => ["dd-mmm-yyyy"]) });
+  await patchRange(root, "Daily Report", "I12:I16", { numberFormat: Array.from({ length: 5 }, () => ["General"]) });
   await patchRange(root, "Daily Report", "H12:H16", { numberFormat: Array.from({ length: 5 }, () => ['"$"#,##0']) });
   await patchRange(root, "Daily Report", "A5:A5", {
     formulas: [['=COUNTIF(DARegisterTable[Record Key],"<>")']]

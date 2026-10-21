@@ -28,11 +28,12 @@ try {
     body: { calculationType: "Full" }
   });
 
-  const [cards, opportunities, questions, workbookItem] = await Promise.all([
+  const [cards, opportunities, questions, workbookItem, documentLinks] = await Promise.all([
     range("A4:G5"),
     range("A11:I16"),
     range("A19:D27"),
-    graph(itemRoot, { useSession: false })
+    graph(itemRoot, { useSession: false }),
+    loadDocumentLinks()
   ]);
 
   const reportDate = new Intl.DateTimeFormat("en-AU", {
@@ -49,7 +50,8 @@ try {
     opportunities: opportunities.values ?? [],
     questions: questions.values ?? [],
     workbookUrl: workbookItem.webUrl,
-    refreshStatus
+    refreshStatus,
+    documentLinks
   });
 
   await graph("/me/sendMail", {
@@ -75,7 +77,31 @@ async function range(address) {
   return graph(`${workbookRoot}/worksheets/${encodeURIComponent(REPORT_SHEET)}/range(address='${address}')`);
 }
 
-function buildReportHtml({ reportDate, cards, opportunities, questions, workbookUrl, refreshStatus }) {
+async function loadDocumentLinks() {
+  const tableRange = await graph(`${workbookRoot}/tables/${encodeURIComponent("DARegisterTable")}/range`);
+  const headers = tableRange.values?.[0] ?? [];
+  const values = tableRange.values?.slice(1) ?? [];
+  const formulas = tableRange.formulas?.slice(1) ?? [];
+  const daIndex = headers.indexOf("DA number");
+  const countIndex = headers.indexOf("Document count");
+  const packIndex = headers.indexOf("Document pack");
+  if ([daIndex, countIndex, packIndex].some((index) => index < 0)) {
+    throw new Error("DARegisterTable is missing DA number, Document count, or Document pack");
+  }
+
+  const result = new Map();
+  for (let rowIndex = 0; rowIndex < values.length; rowIndex += 1) {
+    const daNumber = String(values[rowIndex]?.[daIndex] ?? "").trim();
+    if (!daNumber) continue;
+    result.set(daNumber, {
+      count: values[rowIndex]?.[countIndex] ?? 0,
+      url: hyperlinkUrl(formulas[rowIndex]?.[packIndex])
+    });
+  }
+  return result;
+}
+
+function buildReportHtml({ reportDate, cards, opportunities, questions, workbookUrl, refreshStatus, documentLinks }) {
   const cardColumns = [0, 2, 4, 6];
   const cardHtml = cardColumns.map((column) => `
     <td style="padding:10px;border:1px solid #d8e3dc;background:#edf5ea;text-align:center;">
@@ -88,13 +114,24 @@ function buildReportHtml({ reportDate, cards, opportunities, questions, workbook
   const opportunityTable = opportunityRows.length
     ? `<table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead><tr>${headers.map((header) => `<th style="padding:7px;border:1px solid #d6ddd9;background:#2f6d4f;color:#fff;text-align:left;">${escapeHtml(header)}</th>`).join("")}</tr></thead>
-        <tbody>${opportunityRows.map((row) => `<tr>${row.map((value, index) => {
-          const display = escapeHtml(formatCell(value, index));
+        <tbody>${opportunityRows.map((row) => {
+          const daNumber = String(row[0] ?? "").trim();
+          const documents = documentLinks.get(daNumber);
+          return `<tr>${row.map((value, index) => {
+          const displayValue = index === 8 && documents
+            ? `${Number(documents.count) || 0} documents`
+            : formatCell(value, index);
+          const display = escapeHtml(displayValue);
           if (index === 0 && nonBlank(value)) {
-            return `<td style="padding:7px;border:1px solid #d6ddd9;"><a href="${applicationUrl(value)}">${display}</a></td>`;
+            return `<td style="padding:7px;border:1px solid #d6ddd9;"><a href="${escapeAttribute(applicationUrl(value))}">${display}</a></td>`;
+          }
+          if (index === 8 && documents) {
+            const destination = documents.url || applicationUrl(daNumber);
+            return `<td style="padding:7px;border:1px solid #d6ddd9;"><a href="${escapeAttribute(destination)}">${display}</a></td>`;
           }
           return `<td style="padding:7px;border:1px solid #d6ddd9;">${display}</td>`;
-        }).join("")}</tr>`).join("")}</tbody>
+        }).join("")}</tr>`;
+        }).join("")}</tbody>
       </table>`
     : "<p>No high-priority opportunities are currently listed.</p>";
 
@@ -135,13 +172,12 @@ function formatCell(value, columnIndex) {
   if (columnIndex === 7 && typeof value === "number") {
     return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(value);
   }
-  if (columnIndex === 8 && typeof value === "number") return excelDate(value);
   return String(value);
 }
 
-function excelDate(serial) {
-  const date = new Date(Date.UTC(1899, 11, 30) + Number(serial) * 86400000);
-  return new Intl.DateTimeFormat("en-AU", { timeZone: "UTC", day: "2-digit", month: "short", year: "numeric" }).format(date);
+function hyperlinkUrl(formula) {
+  const match = String(formula ?? "").match(/^=HYPERLINK\("((?:[^"]|"")*)"/i);
+  return match ? match[1].replaceAll('""', '"') : "";
 }
 
 function applicationUrl(daNumber) {
