@@ -1094,7 +1094,9 @@ function encodePath(path) {
 }
 
 function parseRangeAddress(address) {
-  const match = address.match(/!\$?([A-Z]+)\$?(\d+):/i);
+  // Microsoft Graph returns either a multi-cell address (Sheet!A1:C9) or a
+  // single-cell address (Sheet!A1) for sheets whose used range is one cell.
+  const match = address.match(/!\$?([A-Z]+)\$?(\d+)(?::|$)/i);
   if (!match) throw new Error(`Could not parse table address: ${address}`);
   return { firstColumn: match[1].toUpperCase(), headerRow: Number(match[2]) };
 }
