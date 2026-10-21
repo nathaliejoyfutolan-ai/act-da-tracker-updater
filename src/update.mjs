@@ -141,8 +141,13 @@ try {
   sessionId = "";
 }
 
-await setWorkbookDefaultZoom(75);
-console.log(JSON.stringify({ ...updateSummary, defaultZoom: "75%", brandTheme: "Decarby", updatedAtUtc: new Date().toISOString() }));
+const zoomApplied = await setWorkbookDefaultZoom(75);
+console.log(JSON.stringify({
+  ...updateSummary,
+  defaultZoom: zoomApplied ? "75%" : "75% deferred until the workbook is unlocked",
+  brandTheme: "Decarby",
+  updatedAtUtc: new Date().toISOString()
+}));
 
 async function synchroniseRegister(root, features, documentsByDa, documentIndex) {
   const sheetName = "DA Register";
@@ -840,7 +845,13 @@ async function setWorkbookDefaultZoom(zoomScale) {
     changedSheets += 1;
   }
   if (!changedSheets) throw new Error("No worksheet views were found while setting the workbook zoom.");
-  await graphBinary(filePath, { method: "PUT", body: zip.toBuffer(), contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const upload = await graphBinary(filePath, {
+    method: "PUT",
+    body: zip.toBuffer(),
+    contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    tolerateLocked: true
+  });
+  return upload !== null;
 }
 
 async function graphBinary(path, options = {}) {
@@ -856,6 +867,10 @@ async function graphBinary(path, options = {}) {
     if (response.ok) return options.method === "PUT" ? response.json() : Buffer.from(await response.arrayBuffer());
     const details = await response.text();
     const retryable = response.status === 409 || response.status === 423 || response.status === 429 || response.status >= 500;
+    if (options.tolerateLocked && response.status === 423 && attempt === 4) {
+      console.warn("Workbook zoom update deferred because the file is locked by an open editor.");
+      return null;
+    }
     if (!retryable || attempt === 4) throw new Error(`Graph file request failed (${response.status}) ${path}: ${details}`);
     await delay(1000 * 2 ** (attempt - 1));
   }
