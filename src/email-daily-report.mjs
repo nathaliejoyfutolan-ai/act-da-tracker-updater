@@ -110,21 +110,12 @@ async function loadOpportunityData() {
     graph(`${workbookRoot}/worksheets/${encodeURIComponent("DA Documents")}/tables`)
   ]);
   const documentTable = (documentTables.value ?? []).find((table) => table.name === "DADocumentsTable") ?? documentTables.value?.[0];
-  if (!documentTable) throw new Error("No table found on the DA Documents worksheet");
-  const documentTableBase = `${workbookRoot}/tables/${encodeURIComponent(documentTable.id)}`;
-  const documentColumns = await graph(`${documentTableBase}/columns`);
-  const documentDaColumn = documentColumns.value?.find((column) => column.name === "DA number");
-  const documentNameColumn = documentColumns.value?.find((column) => column.name === "Document name");
-  if (!documentDaColumn || !documentNameColumn) throw new Error("DADocumentsTable is missing DA number or Document name");
-  const [documentDaRange, documentNameRange] = await Promise.all([
-    graph(`${documentTableBase}/columns/${encodeURIComponent(documentDaColumn.id)}/dataBodyRange`),
-    graph(`${documentTableBase}/columns/${encodeURIComponent(documentNameColumn.id)}/dataBodyRange`)
-  ]);
+  const documentRows = await loadDocumentRows(documentTable);
   const documentRowByKey = new Map();
-  for (let rowIndex = 0; rowIndex < (documentDaRange.values ?? []).length; rowIndex += 1) {
-    const daNumber = String(documentDaRange.values?.[rowIndex]?.[0] ?? "").trim();
-    const documentName = String(documentNameRange.values?.[rowIndex]?.[0] ?? "").trim();
-    if (daNumber && documentName) documentRowByKey.set(`${daNumber}|${documentName}`, rowIndex + 2);
+  for (const documentRow of documentRows) {
+    if (documentRow.daNumber && documentRow.documentName) {
+      documentRowByKey.set(`${documentRow.daNumber}|${documentRow.documentName}`, documentRow.sheetRow);
+    }
   }
   const headers = tableRange.values?.[0] ?? [];
   const values = tableRange.values?.slice(1) ?? [];
@@ -200,6 +191,41 @@ async function loadOpportunityData() {
       ...candidates.slice(0, 20).map((candidate) => candidate.row)
     ]
   };
+}
+
+async function loadDocumentRows(documentTable) {
+  if (!documentTable) {
+    const usedRange = await graph(`${workbookRoot}/worksheets/${encodeURIComponent("DA Documents")}/usedRange(valuesOnly=true)`);
+    const rows = usedRange.values ?? [];
+    const headers = rows[0] ?? [];
+    const daIndex = headers.indexOf("DA number");
+    const nameIndex = headers.indexOf("Document name");
+    if (daIndex < 0 || nameIndex < 0) return [];
+    return rows.slice(1).map((row, index) => ({
+      daNumber: String(row[daIndex] ?? "").trim(),
+      documentName: String(row[nameIndex] ?? "").trim(),
+      sheetRow: index + 2
+    }));
+  }
+
+  const tableBase = `${workbookRoot}/tables/${encodeURIComponent(documentTable.id)}`;
+  const tableRange = await graph(`${tableBase}/range`);
+  const rows = tableRange.values ?? [];
+  const headers = rows[0] ?? [];
+  const daIndex = headers.indexOf("DA number");
+  const nameIndex = headers.indexOf("Document name");
+  if (daIndex < 0 || nameIndex < 0) return [];
+  const firstSheetRow = sheetRowFromAddress(tableRange.address) + 1;
+  return rows.slice(1).map((row, index) => ({
+    daNumber: String(row[daIndex] ?? "").trim(),
+    documentName: String(row[nameIndex] ?? "").trim(),
+    sheetRow: firstSheetRow + index
+  }));
+}
+
+function sheetRowFromAddress(address) {
+  const match = String(address ?? "").match(/!\$?[A-Z]+\$?(\d+):/i);
+  return match ? Number(match[1]) : 1;
 }
 
 function opportunityScore(documents, stage) {

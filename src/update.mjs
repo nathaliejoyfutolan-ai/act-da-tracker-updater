@@ -12,6 +12,7 @@ import {
   extractEnergyEvidence,
   reviewPdfDocument
 } from "./document-intelligence.mjs";
+import AdmZip from "adm-zip";
 
 const ARC_GIS_FIELDS = [
   "DA_NUMBER", "AMENDMENT_VERSION", "LODGEMENT_DATE", "DATE_START", "DATE_END", "DA_STAGE",
@@ -35,6 +36,19 @@ const GRAPH = "https://graph.microsoft.com/v1.0";
 const WORKBOOK_PATH = "/ACT_DA_Opportunity_Tracker_Interactive.xlsx";
 const SHEET_NAME = "ACT Live Feed";
 const COLUMN_COUNT = 28;
+const BRAND = {
+  navy: "#234B75",
+  blue: "#315F8D",
+  purple: "#7137A8",
+  magenta: "#D53083",
+  coral: "#EF4660",
+  autoFill: "#EAF2FA",
+  manualFill: "#FCEAF4",
+  softPurple: "#F2EAF9",
+  softCoral: "#FDECEF",
+  white: "#FFFFFF",
+  ink: "#182538"
+};
 
 // System-populated fields stay on the left; user-maintained workflow fields
 // stay on the right. Lower-value technical fields remain available but hidden.
@@ -77,6 +91,7 @@ const session = await graph(`${root}/createSession`, {
 });
 sessionId = session.id;
 
+let updateSummary;
 try {
   const documentIndex = await synchroniseDocumentsSheet(root, documentsByDa);
   const tables = await graph(`${root}/worksheets/${encodeURIComponent(SHEET_NAME)}/tables`);
@@ -114,16 +129,20 @@ try {
 
   const registerStats = await synchroniseRegister(root, arcResponse.features, documentsByDa, documentIndex);
   await repairReports(root, rows.length);
+  await applyBrandWorkbookStyle(root);
   await graph(`${root}/application/calculate`, {
     method: "POST",
     body: { calculationType: "Full" }
   });
   await verifyReportHealth(root);
-
-  console.log(JSON.stringify({ updatedRows: rows.length, registerRows: rows.length, documentRows: documentIndex.documentRows, ...registerStats, updatedAtUtc: new Date().toISOString() }));
+  updateSummary = { updatedRows: rows.length, registerRows: rows.length, documentRows: documentIndex.documentRows, ...registerStats };
 } finally {
   await graph(`${root}/closeSession`, { method: "POST", body: {}, tolerate404: true });
+  sessionId = "";
 }
+
+await setWorkbookDefaultZoom(75);
+console.log(JSON.stringify({ ...updateSummary, defaultZoom: "75%", brandTheme: "Decarby", updatedAtUtc: new Date().toISOString() }));
 
 async function synchroniseRegister(root, features, documentsByDa, documentIndex) {
   const sheetName = "DA Register";
@@ -700,15 +719,147 @@ async function formatRegisterZones(root, sheetName, headers, firstColumn, header
   await patchRange(root, sheetName, `${firstColumn}${headerRow}:${manualLast}${lastDataRow}`, { columnHidden: false });
   await patchRange(root, sheetName, `${autoHiddenFirst}${headerRow}:${autoHiddenLast}${lastDataRow}`, { columnHidden: true });
 
-  await patchRangeFill(root, sheetName, `${firstColumn}${headerRow}:${autoHiddenLast}${headerRow}`, "#1F4E78");
-  await patchRangeFont(root, sheetName, `${firstColumn}${headerRow}:${autoHiddenLast}${headerRow}`, { bold: true, color: "#FFFFFF" });
-  await patchRangeFill(root, sheetName, `${manualFirst}${headerRow}:${manualLast}${headerRow}`, "#7F6000");
-  await patchRangeFont(root, sheetName, `${manualFirst}${headerRow}:${manualLast}${headerRow}`, { bold: true, color: "#FFFFFF" });
+  await patchRangeFill(root, sheetName, `${firstColumn}${headerRow}:${autoHiddenLast}${headerRow}`, BRAND.navy);
+  await patchRangeFont(root, sheetName, `${firstColumn}${headerRow}:${autoHiddenLast}${headerRow}`, { bold: true, color: BRAND.white, name: "Aptos" });
+  await patchRangeFill(root, sheetName, `${manualFirst}${headerRow}:${manualLast}${headerRow}`, BRAND.magenta);
+  await patchRangeFont(root, sheetName, `${manualFirst}${headerRow}:${manualLast}${headerRow}`, { bold: true, color: BRAND.white, name: "Aptos" });
+  await patchRangeFormat(root, sheetName, `${firstColumn}${headerRow}:${manualLast}${headerRow}`, {
+    horizontalAlignment: "Center",
+    verticalAlignment: "Center",
+    wrapText: true,
+    rowHeight: 32
+  });
 
   if (lastDataRow >= dataFirstRow) {
-    await patchRangeFill(root, sheetName, `${firstColumn}${dataFirstRow}:${autoVisibleLast}${lastDataRow}`, "#DDEBF7");
-    await patchRangeFill(root, sheetName, `${manualFirst}${dataFirstRow}:${manualLast}${lastDataRow}`, "#FFF2CC");
+    await patchRangeFill(root, sheetName, `${firstColumn}${dataFirstRow}:${autoVisibleLast}${lastDataRow}`, BRAND.autoFill);
+    await patchRangeFill(root, sheetName, `${manualFirst}${dataFirstRow}:${manualLast}${lastDataRow}`, BRAND.manualFill);
+    await patchRangeFont(root, sheetName, `${firstColumn}${dataFirstRow}:${manualLast}${lastDataRow}`, { color: BRAND.ink, name: "Aptos", size: 10 });
   }
+}
+
+async function applyBrandWorkbookStyle(root) {
+  const titleBands = [
+    ["Summary", "A1:I1"],
+    ["Daily Report", "A1:K1"],
+    ["DA Register", "A2:AZ2"],
+    ["Guide", "A1:H1"]
+  ];
+  for (const [sheetName, address] of titleBands) {
+    await patchRangeFill(root, sheetName, address, BRAND.navy);
+    await patchRangeFont(root, sheetName, address, { bold: true, color: BRAND.white, name: "Aptos", size: 16 });
+    await patchRangeFormat(root, sheetName, address, { verticalAlignment: "Center", rowHeight: 28 });
+  }
+
+  const sectionBands = [
+    ["Summary", "A4:B4", BRAND.navy],
+    ["Summary", "D4:E4", BRAND.purple],
+    ["Summary", "A9:B9", BRAND.magenta],
+    ["Summary", "D9:E9", BRAND.coral],
+    ["Summary", "A15:I15", BRAND.navy],
+    ["Summary", "A19:I19", BRAND.purple],
+    ["Daily Report", "A4:B4", BRAND.navy],
+    ["Daily Report", "C4:D4", BRAND.purple],
+    ["Daily Report", "E4:F4", BRAND.magenta],
+    ["Daily Report", "G4:H4", BRAND.coral],
+    ["Daily Report", "A11:I11", BRAND.navy],
+    ["Daily Report", "A19:D19", BRAND.purple]
+  ];
+  for (const [sheetName, address, color] of sectionBands) {
+    await patchRangeFill(root, sheetName, address, color);
+    await patchRangeFont(root, sheetName, address, { bold: true, color: BRAND.white, name: "Aptos" });
+    await patchRangeFormat(root, sheetName, address, { verticalAlignment: "Center", wrapText: true });
+  }
+
+  const softBlocks = [
+    ["Summary", "A5:B7", BRAND.autoFill],
+    ["Summary", "D5:E7", BRAND.softPurple],
+    ["Summary", "A10:B12", BRAND.manualFill],
+    ["Summary", "D10:E12", BRAND.softCoral],
+    ["Daily Report", "A5:B7", BRAND.autoFill],
+    ["Daily Report", "C5:D7", BRAND.softPurple],
+    ["Daily Report", "E5:F7", BRAND.manualFill],
+    ["Daily Report", "G5:H7", BRAND.softCoral],
+    ["Daily Report", "A12:I16", "#F7FAFD"],
+    ["Daily Report", "A20:D27", "#F8F4FC"]
+  ];
+  for (const [sheetName, address, color] of softBlocks) {
+    await patchRangeFill(root, sheetName, address, color);
+    await patchRangeFont(root, sheetName, address, { color: BRAND.ink, name: "Aptos" });
+  }
+
+  await styleDataTable(root, "ACT Live Feed", BRAND.navy, BRAND.autoFill);
+  await styleDataTable(root, "DA Documents", BRAND.purple, BRAND.softPurple);
+}
+
+async function styleDataTable(root, sheetName, headerColor, bodyColor) {
+  const tables = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/tables`);
+  const table = tables.value?.[0];
+  if (!table) return;
+  const tableRange = await graph(`${root}/tables/${encodeURIComponent(table.id)}/range`);
+  const { firstColumn, headerRow } = parseRangeAddress(tableRange.address);
+  const lastColumn = columnName(columnNumber(firstColumn) + tableRange.columnCount - 1);
+  const lastRow = headerRow + tableRange.rowCount - 1;
+  await patchRangeFill(root, sheetName, `${firstColumn}${headerRow}:${lastColumn}${headerRow}`, headerColor);
+  await patchRangeFont(root, sheetName, `${firstColumn}${headerRow}:${lastColumn}${headerRow}`, { bold: true, color: BRAND.white, name: "Aptos" });
+  await patchRangeFormat(root, sheetName, `${firstColumn}${headerRow}:${lastColumn}${headerRow}`, {
+    horizontalAlignment: "Center",
+    verticalAlignment: "Center",
+    wrapText: true,
+    rowHeight: 30
+  });
+  if (lastRow > headerRow) {
+    await patchRangeFill(root, sheetName, `${firstColumn}${headerRow + 1}:${lastColumn}${lastRow}`, bodyColor);
+    await patchRangeFont(root, sheetName, `${firstColumn}${headerRow + 1}:${lastColumn}${lastRow}`, { color: BRAND.ink, name: "Aptos", size: 10 });
+  }
+}
+
+async function setWorkbookDefaultZoom(zoomScale) {
+  const filePath = `/me/drive/root:${encodePath(WORKBOOK_PATH)}:/content`;
+  const response = await graphBinary(filePath);
+  const zip = new AdmZip(response);
+  let changedSheets = 0;
+  for (const entry of zip.getEntries()) {
+    if (!/^xl\/worksheets\/sheet\d+\.xml$/i.test(entry.entryName)) continue;
+    let xml = entry.getData().toString("utf8");
+    const zoomAttributes = ` zoomScale="${zoomScale}" zoomScaleNormal="${zoomScale}"`;
+    if (/<sheetView\b/i.test(xml)) {
+      xml = xml.replace(/<sheetView\b([^>]*)>/i, (match, attributes) => {
+        const selfClosing = /\/\s*$/.test(attributes);
+        const cleaned = attributes
+          .replace(/\/\s*$/, "")
+          .replace(/\szoomScale="[^"]*"/gi, "")
+          .replace(/\szoomScaleNormal="[^"]*"/gi, "");
+        return `<sheetView${cleaned}${zoomAttributes}${selfClosing ? "/" : ""}>`;
+      });
+    } else if (/<sheetViews\b[^>]*>/i.test(xml)) {
+      xml = xml.replace(/<sheetViews\b[^>]*>/i, (match) => `${match}<sheetView workbookViewId="0"${zoomAttributes}/>`);
+    } else {
+      xml = xml.replace(/(<worksheet\b[^>]*>)/i, `$1<sheetViews><sheetView workbookViewId="0"${zoomAttributes}/></sheetViews>`);
+    }
+    zip.updateFile(entry.entryName, Buffer.from(xml, "utf8"));
+    changedSheets += 1;
+  }
+  if (!changedSheets) throw new Error("No worksheet views were found while setting the workbook zoom.");
+  await graphBinary(filePath, { method: "PUT", body: zip.toBuffer(), contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+
+async function graphBinary(path, options = {}) {
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const response = await fetch(`${GRAPH}${path}`, {
+      method: options.method ?? "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(options.contentType ? { "Content-Type": options.contentType } : {})
+      },
+      body: options.body
+    });
+    if (response.ok) return options.method === "PUT" ? response.json() : Buffer.from(await response.arrayBuffer());
+    const details = await response.text();
+    const retryable = response.status === 409 || response.status === 423 || response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === 4) throw new Error(`Graph file request failed (${response.status}) ${path}: ${details}`);
+    await delay(1000 * 2 ** (attempt - 1));
+  }
+  throw new Error(`Graph file request failed after retries: ${path}`);
 }
 
 async function patchRangeFill(root, sheetName, address, color) {
@@ -720,6 +871,13 @@ async function patchRangeFill(root, sheetName, address, color) {
 
 async function patchRangeFont(root, sheetName, address, body) {
   return graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')/format/font`, {
+    method: "PATCH",
+    body
+  });
+}
+
+async function patchRangeFormat(root, sheetName, address, body) {
+  return graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')/format`, {
     method: "PATCH",
     body
   });
