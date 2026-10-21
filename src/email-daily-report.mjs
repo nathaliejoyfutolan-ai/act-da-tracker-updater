@@ -28,12 +28,11 @@ try {
     body: { calculationType: "Full" }
   });
 
-  const [cards, opportunities, questions, workbookItem, documentLinks] = await Promise.all([
+  const [cards, questions, workbookItem, opportunityData] = await Promise.all([
     range("A4:G5"),
-    range("A11:I16"),
     range("A19:D27"),
     graph(itemRoot, { useSession: false }),
-    loadDocumentLinks()
+    loadOpportunityData()
   ]);
 
   const reportDate = new Intl.DateTimeFormat("en-AU", {
@@ -47,11 +46,11 @@ try {
   const html = buildReportHtml({
     reportDate,
     cards: cards.values ?? [],
-    opportunities: opportunities.values ?? [],
+    opportunities: opportunityData.opportunities,
     questions: questions.values ?? [],
     workbookUrl: workbookItem.webUrl,
     refreshStatus,
-    documentLinks
+    documentLinks: opportunityData.documentLinks
   });
 
   await graph("/me/sendMail", {
@@ -77,7 +76,7 @@ async function range(address) {
   return graph(`${workbookRoot}/worksheets/${encodeURIComponent(REPORT_SHEET)}/range(address='${address}')`);
 }
 
-async function loadDocumentLinks() {
+async function loadOpportunityData() {
   const tableRange = await graph(`${workbookRoot}/tables/${encodeURIComponent("DARegisterTable")}/range`);
   const headers = tableRange.values?.[0] ?? [];
   const values = tableRange.values?.slice(1) ?? [];
@@ -89,24 +88,82 @@ async function loadDocumentLinks() {
   const solarIndex = headers.indexOf("Solar allowance");
   const batteryIndex = headers.indexOf("Battery allowance");
   const evidenceIndex = headers.indexOf("Solar / battery evidence");
-  if ([daIndex, countIndex, allDocumentsIndex, costPlanIndex, solarIndex, batteryIndex, evidenceIndex].some((index) => index < 0)) {
+  const priorityIndex = headers.indexOf("Priority");
+  const stageIndex = headers.indexOf("Stage");
+  const lodgedIndex = headers.indexOf("Lodged");
+  const addressIndex = headers.indexOf("Address");
+  const proposalIndex = headers.indexOf("Proposal");
+  const buildingTypeIndex = headers.indexOf("Building type");
+  const developerIndex = headers.indexOf("Organisation / developer lead");
+  const builderIndex = headers.indexOf("Builder");
+  const budgetIndex = headers.indexOf("Project budget (AUD)");
+  const requiredIndexes = [
+    daIndex, countIndex, allDocumentsIndex, costPlanIndex, solarIndex, batteryIndex, evidenceIndex,
+    priorityIndex, stageIndex, lodgedIndex, addressIndex, proposalIndex, buildingTypeIndex,
+    developerIndex, builderIndex, budgetIndex
+  ];
+  if (requiredIndexes.some((index) => index < 0)) {
     throw new Error("DARegisterTable is missing required document-link or document-insight columns");
   }
 
-  const result = new Map();
+  const documentLinks = new Map();
+  const candidates = [];
   for (let rowIndex = 0; rowIndex < values.length; rowIndex += 1) {
+    const row = values[rowIndex] ?? [];
     const daNumber = String(values[rowIndex]?.[daIndex] ?? "").trim();
     if (!daNumber) continue;
-    result.set(daNumber, {
-      count: values[rowIndex]?.[countIndex] ?? 0,
+    const documents = {
+      count: row[countIndex] ?? 0,
       target: hyperlinkUrl(formulas[rowIndex]?.[allDocumentsIndex]),
-      costPlan: Boolean(hyperlinkUrl(formulas[rowIndex]?.[costPlanIndex]) || values[rowIndex]?.[costPlanIndex]),
-      solar: String(values[rowIndex]?.[solarIndex] ?? ""),
-      battery: String(values[rowIndex]?.[batteryIndex] ?? ""),
-      evidence: String(values[rowIndex]?.[evidenceIndex] ?? "")
+      costPlan: Boolean(hyperlinkUrl(formulas[rowIndex]?.[costPlanIndex]) || row[costPlanIndex]),
+      solar: String(row[solarIndex] ?? ""),
+      battery: String(row[batteryIndex] ?? ""),
+      evidence: String(row[evidenceIndex] ?? "")
+    };
+    documentLinks.set(daNumber, documents);
+    const stage = String(row[stageIndex] ?? "");
+    if (String(row[priorityIndex] ?? "") !== "High" || /^Decided$/i.test(stage)) continue;
+    candidates.push({
+      score: opportunityScore(documents, stage),
+      lodged: sortableDate(row[lodgedIndex]),
+      row: [
+        daNumber,
+        stage,
+        row[addressIndex] ?? "",
+        row[proposalIndex] ?? "",
+        row[buildingTypeIndex] ?? "",
+        row[developerIndex] ?? "",
+        row[builderIndex] ?? "",
+        row[budgetIndex] ?? "",
+        `View ${Number(documents.count) || 0} documents`
+      ]
     });
   }
-  return result;
+  candidates.sort((a, b) => b.score - a.score || b.lodged - a.lodged);
+  return {
+    documentLinks,
+    opportunities: [
+      ["DA Number", "Stage", "Project / Address", "Proposal", "Building type", "Developer / Owner", "Builder", "Project Budget", "Documents"],
+      ...candidates.slice(0, 20).map((candidate) => candidate.row)
+    ]
+  };
+}
+
+function opportunityScore(documents, stage) {
+  const evidence = `${documents.solar}; ${documents.battery}; ${documents.evidence}`;
+  return (documents.costPlan ? 10 : 0)
+    + (/solar|photovoltaic|\bpv\b/i.test(evidence) ? 20 : 0)
+    + (/batter(?:y|ies)|\bbess\b/i.test(evidence) ? 20 : 0)
+    + (/inverter/i.test(evidence) ? 20 : 0)
+    + (/^On notification$/i.test(stage) ? 6 : 0)
+    + (/^Under assessment$/i.test(stage) ? 5 : 0)
+    + (/^Lodged$/i.test(stage) ? 4 : 0);
+}
+
+function sortableDate(value) {
+  if (typeof value === "number") return value;
+  const parsed = Date.parse(String(value ?? ""));
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function buildReportHtml({ reportDate, cards, opportunities, questions, workbookUrl, refreshStatus, documentLinks }) {
@@ -166,7 +223,7 @@ function buildReportHtml({ reportDate, cards, opportunities, questions, workbook
       <div style="background:#fff;padding:22px;">
         ${refreshNotice}
         <table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr>${cardHtml}</tr></table>
-        <h2 style="margin-top:28px;color:#174f3b;">Highest-priority opportunities</h2>
+        <h2 style="margin-top:28px;color:#174f3b;">Top 20 highest-priority opportunities</h2>
         ${opportunityTable}
         <h2 style="margin-top:28px;color:#174f3b;">Bilal's market questions</h2>
         <table style="width:100%;border-collapse:collapse;font-size:13px;">${questionHtml}</table>
