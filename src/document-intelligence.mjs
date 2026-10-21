@@ -51,6 +51,7 @@ export function extractEnergyEvidence(text) {
   const evidence = [];
   if (/\bsolar\b|photovoltaic|\bpv\b/.test(source)) evidence.push("Solar mentioned in DA documents");
   if (/\bbatter(?:y|ies)\b|battery energy storage|\bbess\b/.test(source)) evidence.push("Battery mentioned in DA documents");
+  if (/\binverter(?:s)?\b/.test(source)) evidence.push("Inverter mentioned in DA documents");
   return evidence;
 }
 

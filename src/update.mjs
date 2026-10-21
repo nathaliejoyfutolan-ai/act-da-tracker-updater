@@ -193,7 +193,7 @@ async function synchroniseRegister(root, features, documentsByDa, documentIndex)
       "Budget source": firstNonBlank(old("Budget source") === "Not found in source feed" ? "" : old("Budget source"), intelligence.budget ? `DA document: ${costDocument?.name ?? "cost plan"}` : "Not found in source feed"),
       "Solar allowance": firstNonBlank(old("Solar allowance") === "Not stated - review documents" ? "" : old("Solar allowance"), intelligence.solar ? "Mentioned in DA documents" : "", proposal.toUpperCase().includes("SOLAR") ? "Mentioned in proposal" : "Not stated - review documents"),
       "Battery allowance": firstNonBlank(old("Battery allowance") === "Not stated - review documents" ? "" : old("Battery allowance"), intelligence.battery ? "Mentioned in DA documents" : "", proposal.toUpperCase().includes("BATTERY") ? "Mentioned in proposal" : "Not stated - review documents"),
-      "Solar / battery evidence": firstNonBlank(old("Solar / battery evidence"), old("Evidence"), intelligence.energyEvidence, /(SOLAR|BATTERY)/i.test(proposal) ? "Proposal text" : ""),
+      "Solar / battery evidence": firstNonBlank(intelligence.energyEvidence, old("Solar / battery evidence"), old("Evidence"), /(SOLAR|BATTERY|INVERTER)/i.test(proposal) ? "Proposal text" : ""),
       "Document review": firstNonBlank(intelligence.reviewStatus, old("Document review"), priority === "High" ? "Queued" : "Not started"),
       "Next action": old("Next action"),
       "Action owner": old("Action owner"),
@@ -446,7 +446,7 @@ async function extractMissingDocumentIntelligence(features, headers, existingByK
     const cost = preferredDocument(documents, amendment, isCostDocument);
     const application = preferredDocument(documents, amendment, isApplicationDocument);
     const developmentReport = preferredDocument(documents, amendment, isDevelopmentReport);
-    const unchanged = Number(old("Document count")) === documents.length && /^Auto-reviewed v2/.test(textValue(old("Document review")));
+    const unchanged = Number(old("Document count")) === documents.length && /^Auto-reviewed v3/.test(textValue(old("Document review")));
     if (unchanged || (!cost && !application && !developmentReport)) continue;
     candidates.push({
       key,
@@ -480,7 +480,7 @@ async function extractMissingDocumentIntelligence(features, headers, existingByK
       battery: energy.some((value) => value.startsWith("Battery")),
       energyEvidence: energy.join("; "),
       evidence: reviewed.length ? `Automatically reviewed: ${reviewed.join(", ")}` : "",
-      reviewStatus: reviewed.length ? `Auto-reviewed v2 ${new Date().toISOString().slice(0, 10)}` : "Review queued",
+      reviewStatus: reviewed.length ? `Auto-reviewed v3 ${new Date().toISOString().slice(0, 10)}` : "Review queued",
       checked: reviewed.length ? excelDate(Date.now()) : ""
     });
   }
@@ -515,8 +515,9 @@ function isZipDocument(document) {
 }
 
 async function repairReports(root, registerRowCount) {
-  const criteria = '(DARegisterTable[Record Key]<>"")*(DARegisterTable[Priority]="High")';
-  const indexed = (header, row) => `INDEX(FILTER(DARegisterTable[${header}],${criteria}),ROWS($A$12:A${row}))`;
+  const criteria = '(DARegisterTable[Record Key]<>"")*(DARegisterTable[Priority]="High")*(DARegisterTable[Stage]<>"Decided")';
+  const relevanceScore = '20*--ISNUMBER(SEARCH("Mentioned",DARegisterTable[Solar allowance]&""))+20*--ISNUMBER(SEARCH("Mentioned",DARegisterTable[Battery allowance]&""))+20*--ISNUMBER(SEARCH("inverter",DARegisterTable[Solar / battery evidence]&""))+10*--(DARegisterTable[Cost plan document]<>"")+6*--(DARegisterTable[Stage]="On notification")+5*--(DARegisterTable[Stage]="Under assessment")+4*--(DARegisterTable[Stage]="Lodged")';
+  const indexed = (header, row) => `INDEX(SORTBY(FILTER(DARegisterTable[${header}],${criteria}),FILTER(${relevanceScore},${criteria}),-1,FILTER(DARegisterTable[Lodged],${criteria}),-1),ROWS($A$12:A${row}))`;
   const guarded = (header, row) => `IF(${indexed(header, row)}="","",${indexed(header, row)})`;
   const dailyRows = Array.from({ length: 5 }, (_, offset) => {
     const row = 12 + offset;
@@ -529,7 +530,7 @@ async function repairReports(root, registerRowCount) {
       `=IFERROR(${guarded("Organisation / developer lead", row)},"")`,
       `=IFERROR(${guarded("Builder", row)},"")`,
       `=IFERROR(${guarded("Project budget (AUD)", row)},"")`,
-      `=IFERROR(HYPERLINK("#'DA Documents'!A"&MATCH(A${row},'DA Documents'!B:B,0),COUNTIF('DA Documents'!B:B,A${row})&" documents"),"")`
+      `=IFERROR(HYPERLINK("#'DA Documents'!A"&MATCH(A${row},'DA Documents'!B:B,0),"View "&COUNTIF('DA Documents'!B:B,A${row})&" documents"),"")`
     ];
   });
   await patchRange(root, "Daily Report", "A11:I11", {

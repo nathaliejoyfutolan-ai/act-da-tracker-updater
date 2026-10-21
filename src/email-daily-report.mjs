@@ -84,9 +84,13 @@ async function loadDocumentLinks() {
   const formulas = tableRange.formulas?.slice(1) ?? [];
   const daIndex = headers.indexOf("DA number");
   const countIndex = headers.indexOf("Document count");
-  const packIndex = headers.indexOf("Document pack");
-  if ([daIndex, countIndex, packIndex].some((index) => index < 0)) {
-    throw new Error("DARegisterTable is missing DA number, Document count, or Document pack");
+  const allDocumentsIndex = headers.indexOf("All documents");
+  const costPlanIndex = headers.indexOf("Cost plan document");
+  const solarIndex = headers.indexOf("Solar allowance");
+  const batteryIndex = headers.indexOf("Battery allowance");
+  const evidenceIndex = headers.indexOf("Solar / battery evidence");
+  if ([daIndex, countIndex, allDocumentsIndex, costPlanIndex, solarIndex, batteryIndex, evidenceIndex].some((index) => index < 0)) {
+    throw new Error("DARegisterTable is missing required document-link or document-insight columns");
   }
 
   const result = new Map();
@@ -95,7 +99,11 @@ async function loadDocumentLinks() {
     if (!daNumber) continue;
     result.set(daNumber, {
       count: values[rowIndex]?.[countIndex] ?? 0,
-      url: hyperlinkUrl(formulas[rowIndex]?.[packIndex])
+      target: hyperlinkUrl(formulas[rowIndex]?.[allDocumentsIndex]),
+      costPlan: Boolean(hyperlinkUrl(formulas[rowIndex]?.[costPlanIndex]) || values[rowIndex]?.[costPlanIndex]),
+      solar: String(values[rowIndex]?.[solarIndex] ?? ""),
+      battery: String(values[rowIndex]?.[batteryIndex] ?? ""),
+      evidence: String(values[rowIndex]?.[evidenceIndex] ?? "")
     });
   }
   return result;
@@ -109,7 +117,7 @@ function buildReportHtml({ reportDate, cards, opportunities, questions, workbook
       <div style="font-size:26px;font-weight:700;color:#174f3b;">${escapeHtml(cards[1]?.[column] ?? "0")}</div>
     </td>`).join("");
 
-  const headers = opportunities[0] ?? [];
+  const headers = [...(opportunities[0] ?? []), "Document insights"];
   const opportunityRows = opportunities.slice(1).filter((row) => row.some(nonBlank));
   const opportunityTable = opportunityRows.length
     ? `<table style="width:100%;border-collapse:collapse;font-size:12px;">
@@ -117,20 +125,22 @@ function buildReportHtml({ reportDate, cards, opportunities, questions, workbook
         <tbody>${opportunityRows.map((row) => {
           const daNumber = String(row[0] ?? "").trim();
           const documents = documentLinks.get(daNumber);
-          return `<tr>${row.map((value, index) => {
+          const cells = row.map((value, index) => {
           const displayValue = index === 8 && documents
-            ? `${Number(documents.count) || 0} documents`
+            ? `View ${Number(documents.count) || 0} documents`
             : formatCell(value, index);
           const display = escapeHtml(displayValue);
           if (index === 0 && nonBlank(value)) {
             return `<td style="padding:7px;border:1px solid #d6ddd9;"><a href="${escapeAttribute(applicationUrl(value))}">${display}</a></td>`;
           }
           if (index === 8 && documents) {
-            const destination = documents.url || applicationUrl(daNumber);
+            const destination = workbookLocationUrl(workbookUrl, documents.target) || workbookUrl;
             return `<td style="padding:7px;border:1px solid #d6ddd9;"><a href="${escapeAttribute(destination)}">${display}</a></td>`;
           }
           return `<td style="padding:7px;border:1px solid #d6ddd9;">${display}</td>`;
-        }).join("")}</tr>`;
+        });
+          cells.push(`<td style="padding:7px;border:1px solid #d6ddd9;">${escapeHtml(documentInsight(documents))}</td>`);
+          return `<tr>${cells.join("")}</tr>`;
         }).join("")}</tbody>
       </table>`
     : "<p>No high-priority opportunities are currently listed.</p>";
@@ -178,6 +188,24 @@ function formatCell(value, columnIndex) {
 function hyperlinkUrl(formula) {
   const match = String(formula ?? "").match(/^=HYPERLINK\("((?:[^"]|"")*)"/i);
   return match ? match[1].replaceAll('""', '"') : "";
+}
+
+function workbookLocationUrl(workbookUrl, internalTarget) {
+  if (!workbookUrl || !internalTarget) return "";
+  const destination = new URL(workbookUrl);
+  destination.searchParams.set("ActiveCell", String(internalTarget).replace(/^#/, ""));
+  return destination.toString();
+}
+
+function documentInsight(documents) {
+  if (!documents) return "No document insight available yet";
+  const evidence = `${documents.solar}; ${documents.battery}; ${documents.evidence}`;
+  const insights = [];
+  if (documents.costPlan) insights.push("Cost plan available");
+  if (/solar|photovoltaic|\bpv\b/i.test(evidence)) insights.push("Solar mentioned");
+  if (/batter(?:y|ies)|\bbess\b/i.test(evidence)) insights.push("Battery mentioned");
+  if (/inverter/i.test(evidence)) insights.push("Inverter mentioned");
+  return insights.length ? [...new Set(insights)].join("; ") : "No relevant mention identified yet";
 }
 
 function applicationUrl(daNumber) {

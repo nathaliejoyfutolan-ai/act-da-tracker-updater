@@ -48,8 +48,8 @@ test("normalizes stage labels and creates absolute ACT application links", () =>
 });
 
 test("extracts document intelligence conservatively", () => {
-  const text = `Builder: Example Construction Pty Ltd\nSolar PV included\nConstruction Works Total (Excluding GST)\n9,510 m2\n1,865\n17,735,705`;
+  const text = `Builder: Example Construction Pty Ltd\nSolar PV and inverter included\nConstruction Works Total (Excluding GST)\n9,510 m2\n1,865\n17,735,705`;
   assert.equal(extractBuilder(text), "Example Construction Pty Ltd");
   assert.equal(extractBudget(text), 17735705);
-  assert.deepEqual(extractEnergyEvidence(text), ["Solar mentioned in DA documents"]);
+  assert.deepEqual(extractEnergyEvidence(text), ["Solar mentioned in DA documents", "Inverter mentioned in DA documents"]);
 });
