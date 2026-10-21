@@ -2,16 +2,15 @@ name: Email ACT DA daily report
 
 on:
   schedule:
-    # Multiple off-peak triggers improve reliability when GitHub delays scheduled jobs.
-    # The sender deduplicates by Philippine report date.
-    - cron: "29,39,49,59 21 * * *"
+    # 21:30 UTC is 05:30 in the Philippines the following day.
+    - cron: "30 21 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: act-da-daily-report
+  group: act-da-workbook
   cancel-in-progress: false
 
 jobs:
@@ -44,29 +43,40 @@ jobs:
         id: refresh
         if: steps.report_gate.outputs.should_send == 'true'
         continue-on-error: true
-        run: npm run update
-        env:
-          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
-          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
-          MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
-      - name: Retry the refresh once
-        id: refresh_retry
-        if: steps.report_gate.outputs.should_send == 'true' && steps.refresh.outcome == 'failure'
-        continue-on-error: true
-        run: npm run update
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npm run update; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              sleep $((attempt * 30))
+            fi
+          done
+          exit 1
         env:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
       - name: Email the Daily Report
         if: always() && steps.report_gate.outputs.should_send == 'true'
-        run: npm run email-daily-report
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npm run email-daily-report; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              sleep $((attempt * 20))
+            fi
+          done
+          exit 1
         env:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           MS_REFRESH_TOKEN: ${{ secrets.MS_REFRESH_TOKEN }}
           REPORT_RECIPIENT: nathalie@decarbysolar.com.au
-          REPORT_REFRESH_STATUS: ${{ (steps.refresh.outcome == 'success' || steps.refresh_retry.outcome == 'success') && 'fresh' || 'stale' }}
+          REPORT_REFRESH_STATUS: ${{ steps.refresh.outcome == 'success' && 'fresh' || 'stale' }}
       - name: Record successful scheduled delivery
         if: success() && github.event_name == 'schedule' && steps.report_gate.outputs.should_send == 'true'
         run: |

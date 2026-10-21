@@ -19,7 +19,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: act-da-tracker-update
+  group: act-da-workbook
   cancel-in-progress: false
 
 jobs:
@@ -34,8 +34,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npm run update
+      - name: Refresh, repair, and validate the tracker
         if: github.event_name == 'schedule' || inputs.operation == 'update'
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npm run update; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              sleep $((attempt * 30))
+            fi
+          done
+          exit 1
         env:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}

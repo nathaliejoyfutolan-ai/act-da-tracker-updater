@@ -36,6 +36,13 @@ const GRAPH = "https://graph.microsoft.com/v1.0";
 const WORKBOOK_PATH = "/ACT_DA_Opportunity_Tracker_Interactive.xlsx";
 const SHEET_NAME = "ACT Live Feed";
 const COLUMN_COUNT = 28;
+const LIVE_FEED_HEADERS = [
+  "Record key", "DA number", "Amendment", "DA detail URL", "Lodged", "Notification closes", "Stage",
+  "Priority", "Building type", "District", "Suburb", "Address", "Block", "Section", "Proposal",
+  "Organisation / developer lead", "Applicant", "Application type", "Application subtype", "Days to notification close",
+  "Source last updated", "Latitude", "Planning ACT browse URL", "ACTmapi URL", "Longitude", "Object ID",
+  "Next action", "Notes"
+];
 const BRAND = {
   navy: "#234B75",
   blue: "#315F8D",
@@ -122,10 +129,14 @@ try {
   const lastDataRow = firstDataRow + rowsToWrite.length - 1;
   const address = `${firstColumn}${firstDataRow}:${lastColumn}${lastDataRow}`;
 
+  await patchRange(root, SHEET_NAME, `${firstColumn}${headerRow}:${lastColumn}${headerRow}`, { values: [LIVE_FEED_HEADERS] });
+
   await graph(`${root}/worksheets/${encodeURIComponent(SHEET_NAME)}/range(address='${address}')`, {
     method: "PATCH",
     body: { values: rowsToWrite }
   });
+  await writeLiveFeedLinks(root, firstColumn, firstDataRow, rows, arcResponse.features);
+  await clearOrphanRecordKeyColumn(root, SHEET_NAME, firstColumn, headerRow, lastDataRow);
 
   const registerStats = await synchroniseRegister(root, arcResponse.features, documentsByDa, documentIndex);
   await repairReports(root, rows.length);
@@ -295,16 +306,7 @@ async function synchroniseRegister(root, features, documentsByDa, documentIndex)
     await setColumnNumberFormat(root, sheetName, headers, firstColumn, firstDataRow, lastDataRow, header, '"$"#,##0');
   }
 
-  // Column A is an orphaned legacy Record Key copy. The actual DARegisterTable starts in column B.
-  if (columnNumber(firstColumn) > 1) {
-    const legacyHeader = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A1:A1')`);
-    if (String(legacyHeader.values?.[0]?.[0] ?? "").trim().toLowerCase() === "record key") {
-      await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A1:A${Math.max(lastDataRow, 1000)}')/clear`, {
-        method: "POST",
-        body: { applyTo: "Contents" }
-      });
-    }
-  }
+  await clearOrphanRecordKeyColumn(root, sheetName, firstColumn, headerRow, lastDataRow);
   const legacyCell = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A1:A1')`);
   await formatRegisterZones(root, sheetName, headers, firstColumn, headerRow, lastDataRow);
 
@@ -643,14 +645,12 @@ async function repairReports(root, registerRowCount) {
 }
 
 async function verifyReportHealth(root) {
-  const checks = [
-    ["Summary", "A5:D10"],
-    ["Summary", "A20:I40"],
-    ["Daily Report", "A5:K27"]
-  ];
+  const worksheets = await graph(`${root}/worksheets`);
   const errors = [];
-  for (const [sheetName, address] of checks) {
-    const range = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')`);
+  for (const worksheet of worksheets.value ?? []) {
+    const sheetName = worksheet.name;
+    const range = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/usedRange(valuesOnly=true)`, { tolerate404: true });
+    if (!range.address) continue;
     const { firstColumn, headerRow: firstRow } = parseRangeAddress(range.address);
     for (let rowIndex = 0; rowIndex < (range.values ?? []).length; rowIndex += 1) {
       const row = range.values[rowIndex];
@@ -663,7 +663,67 @@ async function verifyReportHealth(root) {
       }
     }
   }
+  await verifyWorkbookStructure(root, errors);
   if (errors.length) throw new Error(`Report verification found formula errors: ${errors.join("; ")}`);
+}
+
+async function verifyWorkbookStructure(root, errors) {
+  const expectedTables = [
+    [SHEET_NAME, LIVE_FEED_HEADERS],
+    ["DA Register", REGISTER_HEADERS],
+    ["DA Documents", ["Record Key", "DA number", "Amendment", "Document type", "Document name", "Size (KB)", "Document URL"]]
+  ];
+  for (const [sheetName, expectedHeaders] of expectedTables) {
+    const tables = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/tables`);
+    const table = tables.value?.[0];
+    if (!table) {
+      errors.push(`${sheetName}: missing Excel table`);
+      continue;
+    }
+    const tableRange = await graph(`${root}/tables/${encodeURIComponent(table.id)}/range`);
+    const headers = (tableRange.values?.[0] ?? []).map((value) => textValue(value));
+    if (!sameHeaders(headers, expectedHeaders)) errors.push(`${sheetName}: headers are out of order or duplicated`);
+    const duplicates = headers.filter((header, index) => header && headers.indexOf(header) !== index);
+    if (duplicates.length) errors.push(`${sheetName}: duplicate headers ${[...new Set(duplicates)].join(", ")}`);
+    const { firstColumn, headerRow } = parseRangeAddress(tableRange.address);
+    if (columnNumber(firstColumn) > 1) {
+      const orphan = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A${headerRow}:A${headerRow}')`);
+      if (textValue(orphan.values?.[0]?.[0]).toLowerCase() === "record key") errors.push(`${sheetName}: orphaned Record key column remains`);
+    }
+  }
+
+  const reportHeaders = await graph(`${root}/worksheets/${encodeURIComponent("Daily Report")}/range(address='A11:I11')`);
+  const expectedReportHeaders = ["DA Number", "Stage", "Project / Address", "Proposal", "Building type", "Developer / Owner", "Builder", "Project Budget", "Documents"];
+  if (!sameHeaders(reportHeaders.values?.[0] ?? [], expectedReportHeaders)) errors.push("Daily Report: opportunity headers are incorrect");
+}
+
+async function writeLiveFeedLinks(root, firstColumn, firstDataRow, rows, features) {
+  if (!rows.length) return;
+  const daColumn = columnName(columnNumber(firstColumn) + 1);
+  const urlColumn = columnName(columnNumber(firstColumn) + 3);
+  const lastDataRow = firstDataRow + rows.length - 1;
+  const daFormulas = features.map(({ attributes: a = {} }) => [
+    `=HYPERLINK("${formulaText(directApplicationUrl(a.DA_NUMBER, a.AMENDMENT_VERSION))}","${formulaText(a.DA_NUMBER)}")`
+  ]);
+  const urlFormulas = features.map(({ attributes: a = {} }) => [
+    `=HYPERLINK("${formulaText(directApplicationUrl(a.DA_NUMBER, a.AMENDMENT_VERSION))}","Open DA")`
+  ]);
+  await patchRange(root, SHEET_NAME, `${daColumn}${firstDataRow}:${daColumn}${lastDataRow}`, { formulas: daFormulas });
+  await patchRange(root, SHEET_NAME, `${urlColumn}${firstDataRow}:${urlColumn}${lastDataRow}`, { formulas: urlFormulas });
+}
+
+async function clearOrphanRecordKeyColumn(root, sheetName, firstColumn, headerRow, lastDataRow) {
+  if (columnNumber(firstColumn) <= 1) return;
+  const candidateRows = [...new Set([1, headerRow])];
+  for (const row of candidateRows) {
+    const cell = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A${row}:A${row}')`);
+    if (textValue(cell.values?.[0]?.[0]).toLowerCase() !== "record key") continue;
+    await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/range(address='A1:A${Math.max(lastDataRow, 1000)}')/clear`, {
+      method: "POST",
+      body: { applyTo: "Contents" }
+    });
+    return;
+  }
 }
 
 async function resizeTableRows(tableBase, tableRange, targetRows, columnCount) {
