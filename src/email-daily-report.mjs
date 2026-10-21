@@ -280,6 +280,12 @@ function buildReportHtml({ reportDate, cards, opportunities, questions, workbook
           if (index === 1) {
             return `<td style="padding:9px 8px;border-right:1px solid #e4e3eb;border-bottom:1px solid #e4e3eb;background:${background};vertical-align:top;">${stageBadge(displayValue)}</td>`;
           }
+          if (index === 3) {
+            return `<td style="padding:9px 8px;border-right:1px solid #e4e3eb;border-bottom:1px solid #e4e3eb;background:${background};vertical-align:top;color:#303746;">
+              <div>${display}</div>
+              <a href="${escapeAttribute(applicationUrl(daNumber))}" style="display:inline-block;margin-top:8px;padding:5px 9px;border-radius:14px;background:#fff0f5;color:#bd2f72;font-weight:800;text-decoration:none;white-space:nowrap;">View project proposal&nbsp;→</a>
+            </td>`;
+          }
           if (index === 8 && documents) {
             const destination = workbookLocationUrl(workbookUrl, documents.target) || workbookUrl;
             return `<td style="padding:9px 8px;border-right:1px solid #e4e3eb;border-bottom:1px solid #e4e3eb;background:${background};vertical-align:top;"><a href="${escapeAttribute(destination)}" style="display:inline-block;padding:6px 9px;border-radius:14px;background:#f2e8fb;color:#7137a8;font-weight:800;text-decoration:none;white-space:nowrap;">${display} →</a></td>`;
