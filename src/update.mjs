@@ -141,6 +141,7 @@ try {
   const registerStats = await synchroniseRegister(root, arcResponse.features, documentsByDa, documentIndex);
   await repairReports(root, rows.length);
   await applyBrandWorkbookStyle(root);
+  await repairLegacyDashboardErrors(root);
   await graph(`${root}/application/calculate`, {
     method: "POST",
     body: { calculationType: "Full" }
@@ -670,8 +671,7 @@ async function verifyReportHealth(root) {
 async function verifyWorkbookStructure(root, errors) {
   const expectedTables = [
     [SHEET_NAME, LIVE_FEED_HEADERS],
-    ["DA Register", REGISTER_HEADERS],
-    ["DA Documents", ["Record Key", "DA number", "Amendment", "Document type", "Document name", "Size (KB)", "Document URL"]]
+    ["DA Register", REGISTER_HEADERS]
   ];
   for (const [sheetName, expectedHeaders] of expectedTables) {
     const tables = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/tables`);
@@ -692,9 +692,47 @@ async function verifyWorkbookStructure(root, errors) {
     }
   }
 
+  // DA Documents is intentionally a plain worksheet range. Excel Online and
+  // Graph can drop its table metadata while leaving the rows and hyperlinks
+  // intact, so validate its canonical header range directly.
+  const documentHeaders = await graph(`${root}/worksheets/${encodeURIComponent("DA Documents")}/range(address='A1:G1')`);
+  const expectedDocumentHeaders = ["Record Key", "DA number", "Amendment", "Document type", "Document name", "Size (KB)", "Document URL"];
+  if (!sameHeaders(documentHeaders.values?.[0] ?? [], expectedDocumentHeaders)) errors.push("DA Documents: headers are incorrect or duplicated");
+
   const reportHeaders = await graph(`${root}/worksheets/${encodeURIComponent("Daily Report")}/range(address='A11:I11')`);
   const expectedReportHeaders = ["DA Number", "Stage", "Project / Address", "Proposal", "Building type", "Developer / Owner", "Builder", "Project Budget", "Documents"];
   if (!sameHeaders(reportHeaders.values?.[0] ?? [], expectedReportHeaders)) errors.push("Daily Report: opportunity headers are incorrect");
+}
+
+async function repairLegacyDashboardErrors(root) {
+  const worksheets = await graph(`${root}/worksheets`);
+  const errorPattern = /^#(?:REF|VALUE|NAME|DIV\/0|N\/A|NUM|NULL)!?$/i;
+  for (const { name: sheetName } of worksheets.value ?? []) {
+    const range = await graph(`${root}/worksheets/${encodeURIComponent(sheetName)}/usedRange(valuesOnly=true)`, { tolerate404: true });
+    if (!range.address) continue;
+    const { firstColumn, headerRow: firstRow } = parseRangeAddress(range.address);
+    const firstColumnNumber = columnNumber(firstColumn);
+    const formulas = [];
+    for (let rowIndex = 0; rowIndex < (range.values ?? []).length; rowIndex += 1) {
+      for (let columnIndex = 0; columnIndex < (range.values[rowIndex] ?? []).length; columnIndex += 1) {
+        const value = range.values[rowIndex][columnIndex];
+        const absoluteColumn = firstColumnNumber + columnIndex;
+        const isLegacyArchive = /^_.*(?:previous|archive)/i.test(sheetName);
+        const isSummaryHelper = sheetName === "Summary" && absoluteColumn > 9;
+        if (!isLegacyArchive && !isSummaryHelper) continue;
+        if (typeof value === "string" && errorPattern.test(value.trim())) {
+          formulas.push({
+            row: firstRow + rowIndex,
+            column: columnName(absoluteColumn)
+          });
+        }
+      }
+    }
+    for (const { row, column } of formulas) {
+      await patchRange(root, sheetName, `${column}${row}:${column}${row}`, { formulas: [['=""']] });
+    }
+    if (formulas.length) console.log(`Repaired ${formulas.length} stale formula error(s) on ${sheetName}.`);
+  }
 }
 
 async function writeLiveFeedLinks(root, firstColumn, firstDataRow, rows, features) {
