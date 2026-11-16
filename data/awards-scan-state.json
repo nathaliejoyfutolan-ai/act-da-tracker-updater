@@ -1,95 +1,95 @@
 {
-  "generatedAtUtc": "2026-11-13T02:29:33.236Z",
+  "generatedAtUtc": "2026-11-16T01:41:49.158Z",
   "pages": {
     "https://www.climatechoices.act.gov.au/events-news/news/nominations-are-now-open-for-the-2026-bluebell-sustainable-business-awards": {
       "hash": "ae0b26c68939e8214056c2517af3b5091f1c674c8aef5f1e1fbab7804a78829b",
       "status": 403,
-      "checkedAtUtc": "2026-11-13T02:29:14.624Z"
+      "checkedAtUtc": "2026-11-16T01:41:23.067Z"
     },
     "https://www.cwb.org.au/awards/": {
       "hash": "65a5e2652d0431614920193020f5627c85c411cbb18e162ebfbb6deb325b6dae",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:15.142Z"
+      "checkedAtUtc": "2026-11-16T01:41:23.981Z"
     },
     "https://www.championawards.com.au/trades/categories": {
       "hash": "dfb21d40ad8023ddaa6b1e5304f875988d134b8af76f6fe019a3f261b8e1a22c",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:15.856Z"
+      "checkedAtUtc": "2026-11-16T01:41:27.315Z"
     },
     "https://womeninindustry.com.au/nominations/": {
       "hash": "c684e4daf3ecc0e9a8ada30e4991c42a069dfacbf6e5f1930c2612bd9c6575a3",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:17.436Z"
+      "checkedAtUtc": "2026-11-16T01:41:28.924Z"
     },
     "https://awards.airah.org.au/2026-award-categories/": {
       "hash": "431a4f171c61aa7d7479b294c76cb2e03663712b237ff3c97b8a405174e300f0",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:18.058Z"
+      "checkedAtUtc": "2026-11-16T01:41:30.339Z"
     },
     "https://www.engineersaustralia.org.au/publications/excellence-awards-2026-people-awards-entry-handbook": {
       "hash": "e568e989c079c3a0cf120dad7fcb9cee293516e818de23ca95f2d1174a4ed8fd",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:32.825Z"
+      "checkedAtUtc": "2026-11-16T01:41:48.699Z"
     },
     "https://smartenergy.org.au/smart-energy-excellence-awards-2026-celebrates-industry-leaders-at-gala-dinner-in-sydney/": {
-      "hash": "08bced7675e1792b8d15d1c92e37d40e06befe3e940a73d4c4e1fa44d3501684",
+      "hash": "80e06340000f5f5021285e2adfb2796d96c860f2c709c31a4a4eb87d97ad7bc1",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:20.526Z"
+      "checkedAtUtc": "2026-11-16T01:41:32.499Z"
     },
     "https://eec.org.au/events/eec-award-winners-2026-draft/": {
       "hash": "8c291d03f3fbea3ab2cb6cf403f9a2aa5a832bbf4ab633361a1e70e8d5d6a80e",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:21.939Z"
+      "checkedAtUtc": "2026-11-16T01:41:34.348Z"
     },
     "https://banksiafdn.com/about-awards/": {
       "hash": "3e5040355124b9e5b83f31433955591750376cb02be30291e9efe03bab01a76b",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:22.600Z"
+      "checkedAtUtc": "2026-11-16T01:41:35.294Z"
     },
     "https://www.telstra.com.au/small-business/best-of-business-awards": {
-      "hash": "90e456f32a407e7797fb8015421044edf373bd3a685b737a6d3385fd09565b17",
+      "hash": "c5f5331fb38d4f2e0d643d5819e73bdb15f6d14e8be13bcfe7ecbb5790a72e97",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:23.677Z"
+      "checkedAtUtc": "2026-11-16T01:41:35.902Z"
     },
     "https://www.championawards.com.au/business/terms-and-conditions": {
       "hash": "47d6a0a3a79685d0fdecaec9a8e807952d6136243f657078a73e0aaee90bd202",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:24.088Z"
+      "checkedAtUtc": "2026-11-16T01:41:36.366Z"
     },
     "https://www.act.gov.au/community/honours-and-awards/act-womens-awards-and-honour-roll": {
       "hash": "ae0b26c68939e8214056c2517af3b5091f1c674c8aef5f1e1fbab7804a78829b",
       "status": 403,
-      "checkedAtUtc": "2026-11-13T02:29:25.623Z"
+      "checkedAtUtc": "2026-11-16T01:41:38.084Z"
     },
     "https://cleanenergycouncil.org.au/events/awards": {
       "hash": "800b3e38f88749d8e19dcba3908144d8340db07b2502cb2b4b69a9f470a9d507",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:25.850Z"
+      "checkedAtUtc": "2026-11-16T01:41:38.333Z"
     },
     "https://www.championawards.com.au/womens/terms-and-conditions": {
       "hash": "1aee0155bc57fc3ebec5f57f66cb740d731b043cdfc0069f5893f68fdfacb262",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:26.765Z"
+      "checkedAtUtc": "2026-11-16T01:41:39.527Z"
     },
     "https://awards.airah.org.au/towards-net-zero-competition/": {
       "hash": "cbac3ea3e5332db364b4f11ebab469e435fe506d29521daa3bc67ea45ab99f3b",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:27.893Z"
+      "checkedAtUtc": "2026-11-16T01:41:40.488Z"
     },
     "https://www.act.gov.au/community/honours-and-awards/multicultural-awards": {
       "hash": "ae0b26c68939e8214056c2517af3b5091f1c674c8aef5f1e1fbab7804a78829b",
       "status": 403,
-      "checkedAtUtc": "2026-11-13T02:29:29.036Z"
+      "checkedAtUtc": "2026-11-16T01:41:41.280Z"
     },
     "https://ausmumpreneur.com/entry/": {
       "hash": "5e1af95b02bc213b8688ba96b2fdf1371749a85c04c8a6ca196b297f028ffcd6",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:29.261Z"
+      "checkedAtUtc": "2026-11-16T01:41:41.523Z"
     },
     "https://alibiawards.com.au/entry-requirements/": {
       "hash": "9b95ad015e76509b01d9cd87a17e88443b6de101e78e9422d04c1eab08ae81c6",
       "status": 200,
-      "checkedAtUtc": "2026-11-13T02:29:31.787Z"
+      "checkedAtUtc": "2026-11-16T01:41:44.179Z"
     }
   }
 }
