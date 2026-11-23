@@ -1,9 +1,9 @@
 {
-  "generatedAtUtc": "2026-11-20T02:54:23.434Z",
-  "generatedAtPht": "Friday 20 November 2026 at 10:54 am GMT+8",
+  "generatedAtUtc": "2026-11-23T02:25:06.553Z",
+  "generatedAtPht": "Monday 23 November 2026 at 10:25 am GMT+8",
   "awardsChecked": 19,
   "pagesChanged": 2,
-  "pagesUnavailable": 3,
+  "pagesUnavailable": 4,
   "scans": [
     {
       "name": "Bluebell Sustainable Business Awards",
@@ -21,7 +21,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "ae0b26c68939e8214056c2517af3b5091f1c674c8aef5f1e1fbab7804a78829b",
-      "checkedAtUtc": "2026-11-20T02:54:04.101Z",
+      "checkedAtUtc": "2026-11-23T02:24:18.229Z",
       "pageTitle": "Just a moment...",
       "dateSignals": []
     },
@@ -38,10 +38,10 @@
       "source": "https://www.cwb.org.au/awards/",
       "ok": true,
       "status": 200,
-      "changed": false,
+      "changed": true,
       "firstScan": false,
-      "hash": "65a5e2652d0431614920193020f5627c85c411cbb18e162ebfbb6deb325b6dae",
-      "checkedAtUtc": "2026-11-20T02:54:04.569Z",
+      "hash": "9182873e9836fb6e485fc956b98520e8563cbc050089ff9fa3c756151a5d46e1",
+      "checkedAtUtc": "2026-11-23T02:24:18.589Z",
       "pageTitle": "Canberra Women in Business Awards &#8211; Canberra Women in Business",
       "dateSignals": []
     },
@@ -61,7 +61,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "dfb21d40ad8023ddaa6b1e5304f875988d134b8af76f6fe019a3f261b8e1a22c",
-      "checkedAtUtc": "2026-11-20T02:54:05.633Z",
+      "checkedAtUtc": "2026-11-23T02:24:25.750Z",
       "pageTitle": "Trades Champions - Precedent Productions",
       "dateSignals": [
         "27 June 2026"
@@ -83,7 +83,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "c684e4daf3ecc0e9a8ada30e4991c42a069dfacbf6e5f1930c2612bd9c6575a3",
-      "checkedAtUtc": "2026-11-20T02:54:06.665Z",
+      "checkedAtUtc": "2026-11-23T02:24:27.489Z",
       "pageTitle": "Nominations - Women in Industry",
       "dateSignals": []
     },
@@ -103,7 +103,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "431a4f171c61aa7d7479b294c76cb2e03663712b237ff3c97b8a405174e300f0",
-      "checkedAtUtc": "2026-11-20T02:54:07.646Z",
+      "checkedAtUtc": "2026-11-23T02:24:28.321Z",
       "pageTitle": "Award Categories | AIRAH Awards",
       "dateSignals": []
     },
@@ -123,7 +123,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "e568e989c079c3a0cf120dad7fcb9cee293516e818de23ca95f2d1174a4ed8fd",
-      "checkedAtUtc": "2026-11-20T02:54:08.446Z",
+      "checkedAtUtc": "2026-11-23T02:24:29.012Z",
       "pageTitle": "Excellence Awards 2026: People Awards entry handbook | Engineers Australia",
       "dateSignals": []
     },
@@ -138,14 +138,15 @@
       "probability": 25,
       "expectedWindow": "Q1 2027",
       "source": "https://smartenergy.org.au/smart-energy-excellence-awards-2026-celebrates-industry-leaders-at-gala-dinner-in-sydney/",
-      "ok": true,
-      "status": 200,
-      "changed": true,
+      "ok": false,
+      "status": 0,
+      "changed": false,
       "firstScan": false,
       "hash": "3f5d22d35264271562ce8978dd3874bfaf41897da40ac5ce5a8df32ae1942791",
-      "checkedAtUtc": "2026-11-20T02:54:09.915Z",
-      "pageTitle": "Smart Energy Excellence Awards 2026 Celebrates Industry Leaders at Gala Dinner in Sydney - Smart Energy Council",
-      "dateSignals": []
+      "checkedAtUtc": "2026-11-23T02:24:30.413Z",
+      "pageTitle": "",
+      "dateSignals": [],
+      "error": "The operation was aborted due to timeout"
     },
     {
       "name": "Energy Efficiency Council Awards",
@@ -163,7 +164,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "8c291d03f3fbea3ab2cb6cf403f9a2aa5a832bbf4ab633361a1e70e8d5d6a80e",
-      "checkedAtUtc": "2026-11-20T02:54:10.880Z",
+      "checkedAtUtc": "2026-11-23T02:24:55.414Z",
       "pageTitle": "EEC Award Winners 2026 - Energy Efficiency Council",
       "dateSignals": [
         "27 May 2026"
@@ -185,7 +186,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "3e5040355124b9e5b83f31433955591750376cb02be30291e9efe03bab01a76b",
-      "checkedAtUtc": "2026-11-20T02:54:11.781Z",
+      "checkedAtUtc": "2026-11-23T02:24:56.437Z",
       "pageTitle": "About Awards - Banksia Foundation",
       "dateSignals": []
     },
@@ -204,8 +205,8 @@
       "status": 200,
       "changed": true,
       "firstScan": false,
-      "hash": "3c93cfa41a9c0171bdce7aef69b6ab05348020b1717f9966da64435875f780d9",
-      "checkedAtUtc": "2026-11-20T02:54:12.973Z",
+      "hash": "9bc2d90156a27d1f90b650677b5a9c840b0a7200a6de970bf5ec3b0e545ffd96",
+      "checkedAtUtc": "2026-11-23T02:24:57.281Z",
       "pageTitle": "Telstra Best of Business Awards | Telstra",
       "dateSignals": []
     },
@@ -225,7 +226,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "47d6a0a3a79685d0fdecaec9a8e807952d6136243f657078a73e0aaee90bd202",
-      "checkedAtUtc": "2026-11-20T02:54:13.133Z",
+      "checkedAtUtc": "2026-11-23T02:24:57.567Z",
       "pageTitle": "Business Champions - Precedent Productions",
       "dateSignals": []
     },
@@ -245,7 +246,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "ae0b26c68939e8214056c2517af3b5091f1c674c8aef5f1e1fbab7804a78829b",
-      "checkedAtUtc": "2026-11-20T02:54:14.219Z",
+      "checkedAtUtc": "2026-11-23T02:24:58.398Z",
       "pageTitle": "Just a moment...",
       "dateSignals": []
     },
@@ -265,7 +266,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "800b3e38f88749d8e19dcba3908144d8340db07b2502cb2b4b69a9f470a9d507",
-      "checkedAtUtc": "2026-11-20T02:54:14.688Z",
+      "checkedAtUtc": "2026-11-23T02:24:58.774Z",
       "pageTitle": "Clean Energy Council Awards | Clean Energy Council",
       "dateSignals": [
         "25 Nov 2026",
@@ -291,7 +292,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "1aee0155bc57fc3ebec5f57f66cb740d731b043cdfc0069f5893f68fdfacb262",
-      "checkedAtUtc": "2026-11-20T02:54:15.800Z",
+      "checkedAtUtc": "2026-11-23T02:24:59.900Z",
       "pageTitle": "Women's Champions - Precedent Productions",
       "dateSignals": []
     },
@@ -311,7 +312,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "cbac3ea3e5332db364b4f11ebab469e435fe506d29521daa3bc67ea45ab99f3b",
-      "checkedAtUtc": "2026-11-20T02:54:16.314Z",
+      "checkedAtUtc": "2026-11-23T02:25:00.450Z",
       "pageTitle": "Towards Net Zero Competition | AIRAH Awards",
       "dateSignals": [
         "1 July 2026"
@@ -333,7 +334,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "ae0b26c68939e8214056c2517af3b5091f1c674c8aef5f1e1fbab7804a78829b",
-      "checkedAtUtc": "2026-11-20T02:54:17.111Z",
+      "checkedAtUtc": "2026-11-23T02:25:02.198Z",
       "pageTitle": "Just a moment...",
       "dateSignals": []
     },
@@ -353,7 +354,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "5e1af95b02bc213b8688ba96b2fdf1371749a85c04c8a6ca196b297f028ffcd6",
-      "checkedAtUtc": "2026-11-20T02:54:17.162Z",
+      "checkedAtUtc": "2026-11-23T02:25:02.565Z",
       "pageTitle": "Entry | AusMumpreneur",
       "dateSignals": [
         "10 July 2026",
@@ -380,7 +381,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "9b95ad015e76509b01d9cd87a17e88443b6de101e78e9422d04c1eab08ae81c6",
-      "checkedAtUtc": "2026-11-20T02:54:21.235Z",
+      "checkedAtUtc": "2026-11-23T02:25:04.953Z",
       "pageTitle": "Entry Requirements &#8211; Australian Ladies in Business Initiative Awards",
       "dateSignals": [
         "1 Jun 2026",
@@ -407,7 +408,7 @@
       "changed": false,
       "firstScan": false,
       "hash": "e568e989c079c3a0cf120dad7fcb9cee293516e818de23ca95f2d1174a4ed8fd",
-      "checkedAtUtc": "2026-11-20T02:54:22.574Z",
+      "checkedAtUtc": "2026-11-23T02:25:05.919Z",
       "pageTitle": "Excellence Awards 2026: People Awards entry handbook | Engineers Australia",
       "dateSignals": []
     }
